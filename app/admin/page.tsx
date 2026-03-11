@@ -15,7 +15,8 @@ import {
   excluirRegistro, 
   salvarTurma, 
   salvarQuadra, 
-  efetivarMatricula 
+  efetivarMatricula ,
+  atualizarPerfil
 } from "@/services/adminService";
 
 export default function AdminDashboard() {
@@ -29,7 +30,12 @@ export default function AdminDashboard() {
   const [carregando, setCarregando] = useState(true);
 
   const [modalAberto, setModalAberto] = useState(false);
-  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno">("turma");
+  // 1. No topo, adicione "editar_aluno" ao tipoModal
+  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno">("turma");
+
+  // 2. Adicione este estado para controlar o nível no formulário
+  const [nivelEdicao, setNivelEdicao] = useState("");
+  
   const [idEdicao, setIdEdicao] = useState<number | null>(null);
   const [alunoSelecionado, setAlunoSelecionado] = useState<Matricula | null>(null);
   const [novaTurma, setNovaTurma] = useState({ dia_semana: "Segunda", horario: "18:00", nivel: "Iniciante", professor: "João Paulo", vagas_totais: 6 });
@@ -57,6 +63,13 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error("Erro ao buscar dados do painel:", error);
     }
+  };
+
+  const abrirEdicaoNivel = (matricula: Matricula) => {
+    setAlunoSelecionado(matricula);
+    setNivelEdicao(matricula.perfis?.nivel || "Iniciante");
+    setTipoModal("editar_aluno");
+    setModalAberto(true);
   };
 
   useEffect(() => {
@@ -108,7 +121,9 @@ export default function AdminDashboard() {
     try {
       if (tipoModal === "turma" || tipoModal === "editar_turma") {
         await salvarTurma(novaTurma, idEdicao);
-      } 
+      }else if (tipoModal === "editar_aluno" && alunoSelecionado?.perfil_id) {
+        await atualizarPerfil(alunoSelecionado.perfil_id, { nivel: nivelEdicao });
+      }
       else if (tipoModal === "quadra") {
         await salvarQuadra(novoHorarioQuadra, idEdicao);
       } 
@@ -195,9 +210,14 @@ export default function AdminDashboard() {
                           <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md uppercase tracking-wider font-bold">
                             Nível {alunoSelecionado.perfis?.nivel || "N/A"}
                           </span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-md uppercase font-bold ${alunoSelecionado.status === 'experimental' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'}`}>
-                            {alunoSelecionado.status === 'experimental' ? 'Experimental' : 'Matriculado'}
-                          </span>
+                          {/* BOTÃO PARA EDITAR NÍVEL */}
+                          <button 
+                            type="button"
+                            onClick={() => abrirEdicaoNivel(alunoSelecionado)}
+                            className="text-[10px] text-orange-500 hover:underline font-bold"
+                          >
+                            (Alterar)
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -301,7 +321,29 @@ export default function AdminDashboard() {
                     </div>
                   </>
                 )}
-
+                {tipoModal === "editar_aluno" && alunoSelecionado && (
+                  <div className="space-y-4">
+                    <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-xl mb-4">
+                      <p className="text-sm text-orange-400 font-medium text-center">
+                        Alterando nível de: <span className="text-white font-bold">{alunoSelecionado.perfis?.nome}</span>
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Selecione o Novo Nível</label>
+                      <select 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500"
+                        value={nivelEdicao}
+                        onChange={(e) => setNivelEdicao(e.target.value)}
+                      >
+                        <option value="Iniciante">Iniciante</option>
+                        <option value="Intermediário">Intermediário</option>
+                        <option value="Avançado">Avançado</option>
+                        <option value="Pró">Pró</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
                 {(tipoModal === "turma" || tipoModal === "editar_turma" || tipoModal === "quadra") && (
                   <div>
                     <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Dia da Semana</label>
@@ -397,6 +439,12 @@ export default function AdminDashboard() {
                           {mat.status === "experimental" && (
                             <button onClick={() => abrirModalEfetivar(mat)} className="flex-1 sm:flex-none justify-center px-4 py-2 sm:py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-emerald-600 transition-colors flex items-center gap-2"><UserCheck className="w-4 h-4" /> Efetivar</button>
                           )}
+                          <button 
+                            onClick={() => abrirEdicaoNivel(mat)} 
+                            className="flex-1 sm:flex-none flex justify-center p-2.5 text-slate-400 bg-slate-800 sm:bg-transparent hover:text-white hover:bg-slate-800 rounded-xl transition-all sm:opacity-0 group-hover:opacity-100 flex-shrink-0"
+                          >
+                            <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                          </button>
                           <button onClick={() => excluirItem(mat.id, 'matriculas')} className="p-2 sm:p-2.5 text-slate-500 bg-slate-800 sm:bg-transparent hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all sm:opacity-0 group-hover:opacity-100 flex-shrink-0"><Trash2 className="w-4 h-4 sm:w-5 sm:h-5" /></button>
                         </div>
                       </motion.div>

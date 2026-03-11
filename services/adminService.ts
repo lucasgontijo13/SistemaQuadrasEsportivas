@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { Turma, HorarioQuadra, Matricula } from "@/types";
+import { Turma, HorarioQuadra, Matricula, Perfil } from "@/types";
 
 // 1. Verifica se o utilizador tem permissão para aceder ao painel
 export async function verificarPermissaoAdmin(): Promise<boolean> {
@@ -79,6 +79,17 @@ export async function efetivarMatricula(matriculaId: number) {
     .from('matriculas')
     .update({ status: 'ativo' })
     .eq('id', matriculaId);
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+
+export async function atualizarPerfil(perfilId: string, dados: Partial<Perfil>) {
+  const { error } = await supabase
+    .from('perfis')
+    .update(dados)
+    .eq('id', perfilId);
+
   if (error) throw new Error(error.message);
   return true;
 }
