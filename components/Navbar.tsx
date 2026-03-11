@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { User as UserIcon, LogOut, Loader2, ShieldCheck, CalendarDays } from "lucide-react";
+import { User as UserIcon, LogOut, Loader2, ShieldCheck, CalendarDays, Bell } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export function Navbar() {
@@ -11,19 +11,46 @@ export function Navbar() {
   const [perfil, setPerfil] = useState<any>(null);
   const [carregando, setCarregando] = useState(true);
   const [menuAberto, setMenuAberto] = useState(false);
+  const [temPendencia, setTemPendencia] = useState(false);
+  const [notificacaoAberta, setNotificacaoAberta] = useState(false);
 
   useEffect(() => {
-    async function verificarSessao() {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        setUsuarioLogado(session.user);
-        const { data } = await supabase.from('perfis').select('*').eq('id', session.user.id).single();
-        if (data) setPerfil(data);
+    async function carregarDadosIniciais() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session) {
+          setUsuarioLogado(session.user);
+
+          // Busca o Perfil
+          const { data: perfilData } = await supabase
+            .from('perfis')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (perfilData) setPerfil(perfilData);
+
+          // Busca Pendências de Dados
+          const { data: matriculas } = await supabase
+            .from('matriculas')
+            .select('status')
+            .eq('perfil_id', session.user.id)
+            .eq('status', 'aguardando_dados')
+            .limit(1);
+
+          if (matriculas && matriculas.length > 0) {
+            setTemPendencia(true);
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao carregar dados da navbar:", error);
+      } finally {
+        setCarregando(false);
       }
-      setCarregando(false);
     }
-    verificarSessao();
+
+    carregarDadosIniciais();
   }, []);
 
   const fazerLogout = async () => {
@@ -54,7 +81,7 @@ export function Navbar() {
             
             <div className="flex items-center gap-3">
               
-              {/* ATALHO RÁPIDO: Só aparece se for Admin ou Professor */}
+              {/* ATALHO RÁPIDO: Admin ou Professor */}
               {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
                 <Link 
                   href="/admin" 
@@ -65,7 +92,7 @@ export function Navbar() {
                 </Link>
               )}
 
-    
+              {/* MENU DO USUÁRIO */}
               <div className="relative">
                 <button 
                   onClick={() => setMenuAberto(!menuAberto)}
@@ -92,6 +119,7 @@ export function Navbar() {
                         <p className="text-sm font-bold text-white">{perfil.nome}</p>
                         <p className="text-[10px] text-orange-400 uppercase tracking-wider font-bold">{perfil.tipo}</p>
                       </div>
+
                       <Link href="/agenda" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <CalendarDays className="w-4 h-4" /> Minha Agenda
                       </Link>
@@ -100,7 +128,6 @@ export function Navbar() {
                         <UserIcon className="w-4 h-4" /> Meu Perfil
                       </Link>
 
-                      {/* Mantemos no celular caso ele esteja usando uma tela pequena */}
                       <div className="sm:hidden">
                         {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
                           <Link href="/admin" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
@@ -118,11 +145,52 @@ export function Navbar() {
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* SININHO NO EXTREMO DIREITO */}
+              <div className="relative">
+                <button 
+                  onClick={() => setNotificacaoAberta(!notificacaoAberta)}
+                  className="p-2 text-slate-400 hover:text-white transition-colors relative bg-slate-900/50 rounded-full border border-slate-800/50 hover:border-orange-500/50"
+                >
+                  <Bell className="w-6 h-6" />
+                  {temPendencia && (
+                    <span className="absolute top-2 right-2 w-3 h-3 bg-orange-500 rounded-full border-2 border-slate-950 animate-pulse"></span>
+                  )}
+                </button>
+
+                <AnimatePresence>
+                  {notificacaoAberta && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className="absolute right-0 mt-2 w-72 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-4 z-50"
+                    >
+                      <h4 className="text-white font-bold mb-2 text-sm">Notificações</h4>
+                      <div className="h-px bg-slate-800 mb-3" />
+                      
+                      {temPendencia ? (
+                        <Link 
+                          href="/perfil" 
+                          onClick={() => setNotificacaoAberta(false)}
+                          className="block p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl hover:bg-orange-500/20 transition-all"
+                        >
+                          <p className="text-xs text-orange-400 font-bold mb-1">📝 Dados pendentes!</p>
+                          <p className="text-[11px] text-slate-400 leading-tight">
+                            Sua aula foi aprovada! Clique aqui para completar seus dados no perfil.
+                          </p>
+                        </Link>
+                      ) : (
+                        <p className="text-xs text-slate-500 text-center py-4">Nenhuma notificação nova.</p>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+              
             </div>
 
           ) : (
-            
-            /* BOTÕES PARA QUEM ESTÁ DE FORA */
             <div className="flex items-center gap-4">
               <Link 
                 href="/entrar" 
@@ -131,7 +199,6 @@ export function Navbar() {
                 Entrar
               </Link>
             </div>
-
           )}
         </div>
       </div>
