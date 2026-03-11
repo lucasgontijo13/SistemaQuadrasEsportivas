@@ -31,7 +31,12 @@ export default function AgendaPage() {
             dia_semana, 
             horario, 
             nivel, 
-            professor
+            professor,
+            matriculas (
+              perfis (
+                nome
+              )
+            )
           )
         `)
         .eq('perfil_id', session.user.id);
@@ -88,19 +93,48 @@ export default function AgendaPage() {
                 {/* Faixa lateral indicando status */}
                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${aula.status === 'experimental' ? 'bg-orange-500' : 'bg-emerald-500'}`}></div>
 
-                <div>
+                {/* Conteúdo da Esquerda: Dados da Turma e Colegas */}
+                <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
                     <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${aula.status === 'experimental' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                       {aula.status === 'experimental' ? 'Aula Experimental' : 'Aluno Fixo'}
                     </span>
                   </div>
                   <h3 className="text-2xl font-bold text-white mb-1">{aula.turmas.nivel}</h3>
-                  <p className="text-slate-400 flex items-center gap-2">
+                  <p className="text-slate-400 flex items-center gap-2 mb-4">
                     <UserCheck className="w-4 h-4" /> Professor {aula.turmas.professor}
                   </p>
+
+                  {/* --- NOVA SEÇÃO: COLEGAS DE TURMA --- */}
+                  <div className="pt-4 border-t border-slate-800/50">
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Na areia com você</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {aula.turmas.matriculas && aula.turmas.matriculas.length > 0 ? (
+                        aula.turmas.matriculas.map((mat: any, idx: number) => {
+                          const nomeCompleto = mat.perfis?.nome || "Aluno";
+                          const primeiroNome = nomeCompleto.split(" ")[0];
+                          const inicial = primeiroNome.charAt(0).toUpperCase();
+                          
+                          return (
+                            <div 
+                              key={idx} 
+                              title={primeiroNome}
+                              className="relative flex items-center justify-center shrink-0 h-8 w-8 rounded-full ring-2 ring-slate-900 bg-slate-800 text-slate-300 text-xs font-bold cursor-help transition-transform hover:scale-110 hover:bg-slate-700"
+                            >
+                              <span className="leading-none mt-[1px]">{inicial}</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <span className="text-xs text-slate-500">Só você por enquanto!</span>
+                      )}
+                    </div>
+                  </div>
+                  {/* --------------------------------------- */}
                 </div>
 
-                <div className="flex flex-row sm:flex-col gap-4 sm:gap-2 text-sm font-medium bg-slate-950 p-4 rounded-2xl border border-slate-800 sm:min-w-[140px]">
+                {/* Conteúdo da Direita: Horário */}
+                <div className="flex flex-row sm:flex-col gap-4 sm:gap-2 text-sm font-medium bg-slate-950 p-4 rounded-2xl border border-slate-800 sm:min-w-[140px] shrink-0 mt-4 sm:mt-0">
                   <div className="flex items-center gap-2 text-slate-300">
                     <CalendarDays className="w-4 h-4 text-orange-500" /> {aula.turmas.dia_semana}
                   </div>

@@ -20,9 +20,9 @@ export default function AdminDashboard() {
   const [carregando, setCarregando] = useState(true);
 
   const [modalAberto, setModalAberto] = useState(false);
-  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno">("turma");
+  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno">("turma");
   const [idEdicao, setIdEdicao] = useState<number | null>(null);
-  
+  const [alunoSelecionado, setAlunoSelecionado] = useState<any>(null);
   const [novaTurma, setNovaTurma] = useState({ dia_semana: "Segunda", horario: "18:00", nivel: "Iniciante", professor: "João Paulo", vagas_totais: 6 });
   const [novoHorarioQuadra, setNovoHorarioQuadra] = useState({ dia_semana: "Sábado", horario_inicio: "08:00", horario_fim: "09:00", preco: "R$ 80,00" });
   
@@ -33,13 +33,31 @@ export default function AdminDashboard() {
   const [diaFiltroModal, setDiaFiltroModal] = useState("Segunda");
   const diasDaSemanaModal = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
+  const abrirDetalhesAluno = (matricula: any) => {
+    setAlunoSelecionado(matricula);
+    setTipoModal("ver_aluno");
+    setModalAberto(true);
+  };
+
   const buscarDados = async () => {
     setCarregando(true);
     // MUDANÇA: Buscando CPF, data e contato para saber se o cadastro está completo
     const { data: dadosMatriculas } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis(id, nome, nivel, cpf, data_nascimento, contato_emergencia), turmas(id, dia_semana, horario)`).order('created_at', { ascending: false });
     if (dadosMatriculas) setMatriculas(dadosMatriculas);
 
-    const { data: dadosTurmas } = await supabase.from('turmas').select('*').order('id', { ascending: true });
+    const { data: dadosTurmas } = await supabase
+      .from('turmas')
+      .select(`
+        *,
+        matriculas (
+          id,
+          status,
+          perfis (
+            id, nome, nivel, whatsapp, cpf, data_nascimento, contato_emergencia
+          )
+        )
+      `)
+      .order('id', { ascending: true });
     if (dadosTurmas) setTurmas(dadosTurmas);
 
     const { data: dadosQuadra } = await supabase.from('horarios_quadra').select('*').order('id', { ascending: true });
@@ -225,7 +243,49 @@ export default function AdminDashboard() {
               </h2>
 
               <form onSubmit={salvarDados} className="space-y-4">
-                
+                {/* --- NOVA SECÇÃO: FICHA DO ALUNO --- */}
+                {tipoModal === "ver_aluno" && alunoSelecionado && (
+                  <div className="space-y-4 pb-2">
+                    <div className="flex items-center gap-4 mb-4 border-b border-slate-800 pb-4">
+                      <div className="w-14 h-14 bg-orange-500 text-slate-950 rounded-full flex items-center justify-center font-bold text-2xl flex-shrink-0">
+                        {alunoSelecionado.perfis?.nome?.charAt(0) || "?"}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white text-lg leading-tight">{alunoSelecionado.perfis?.nome || "Aluno"}</h3>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md uppercase tracking-wider font-bold">
+                            Nível {alunoSelecionado.perfis?.nivel || "N/A"}
+                          </span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-md uppercase font-bold ${alunoSelecionado.status === 'experimental' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'}`}>
+                            {alunoSelecionado.status === 'experimental' ? 'Experimental' : 'Matriculado'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">WhatsApp</p>
+                        <p className="text-sm text-slate-300 font-medium">{alunoSelecionado.perfis?.whatsapp || "Não preenchido"}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">CPF</p>
+                          <p className="text-sm text-slate-300">{alunoSelecionado.perfis?.cpf || "Pendente"}</p>
+                        </div>
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Nascimento</p>
+                          <p className="text-sm text-slate-300">{alunoSelecionado.perfis?.data_nascimento || "Pendente"}</p>
+                        </div>
+                      </div>
+                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Contacto de Emergência</p>
+                        <p className="text-sm text-slate-300">{alunoSelecionado.perfis?.contato_emergencia || "Pendente"}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {/* ----------------------------------- */}
                 {tipoModal === "efetivar_aluno" && (
                   <>
                     <div className="mb-4 p-3 sm:p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl flex items-center gap-4">
@@ -332,9 +392,11 @@ export default function AdminDashboard() {
                   </>
                 )}
 
-                <button type="submit" disabled={carregando} className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50">
-                  {carregando ? "Processando..." : tipoModal === "editar_turma" ? "Salvar Alterações" : tipoModal === "efetivar_aluno" ? "Confirmar Matrículas" : "Salvar no Sistema"}
-                </button>
+                {tipoModal !== "ver_aluno" && (
+                  <button type="submit" disabled={carregando} className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50">
+                    {carregando ? "Processando..." : tipoModal === "editar_turma" ? "Salvar Alterações" : tipoModal === "efetivar_aluno" ? "Confirmar Matrículas" : "Salvar no Sistema"}
+                  </button>
+                )}
               </form>
             </motion.div>
           </div>
@@ -416,12 +478,61 @@ export default function AdminDashboard() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   {turmas.map(turma => (
-                    <div key={`turma-${turma.id}`} className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:justify-between sm:items-center group gap-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1"><span className="font-bold text-white text-base sm:text-lg">{turma.dia_semana}</span><span className="text-orange-500 font-bold text-base sm:text-lg">{turma.horario.substring(0,5)}</span></div>
-                        <p className="text-xs sm:text-sm text-slate-400">{turma.nivel} • {turma.vagas_totais} vagas</p>
+                    <div key={`turma-${turma.id}`} className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:justify-between sm:items-start group gap-4">
+                      
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-bold text-white text-base sm:text-lg">{turma.dia_semana}</span>
+                          <span className="text-orange-500 font-bold text-base sm:text-lg">{turma.horario.substring(0,5)}</span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-slate-400 mb-4">{turma.nivel} • Professor(a) responsável</p>
+                        
+                        {/* --- NOVA SEÇÃO: AVATARES E LOTAÇÃO --- */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="flex gap-1.5 flex-wrap">
+                            {turma.matriculas && turma.matriculas.length > 0 ? (
+                              turma.matriculas.map((matricula: any, idx: number) => {
+                                const nomeCompleto = matricula.perfis?.nome || "Aluno";
+                                const primeiroNome = nomeCompleto.split(" ")[0];
+                                const inicial = primeiroNome.charAt(0).toUpperCase();
+                                const isExperimental = matricula.status === 'experimental';
+                                
+                                return (
+                                  <button 
+                                    key={idx} 
+                                    type="button"
+                                    onClick={() => abrirDetalhesAluno(matricula)}
+                                    title={`${nomeCompleto} (${isExperimental ? 'Aula Experimental' : 'Matriculado'})`}
+                                    className={`relative flex items-center justify-center shrink-0 h-8 w-8 rounded-full ring-2 ring-slate-900 text-xs font-bold cursor-pointer transition-transform hover:scale-110 hover:z-10 ${
+                                      isExperimental 
+                                        ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' 
+                                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                    }`}
+                                  >
+                                    <span className="leading-none mt-[1px]">{inicial}</span>
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <span className="text-xs text-slate-500 font-medium bg-slate-950 px-3 py-1.5 rounded-full border border-slate-800">
+                                Sem alunos
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Contador de Lotação */}
+                          <span className="text-xs font-medium px-2 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-slate-400 flex items-center gap-1">
+                            <span className={turma.matriculas?.length >= turma.vagas_totais ? "text-orange-500 font-bold" : "text-emerald-400 font-bold"}>
+                              {turma.matriculas?.length || 0}
+                            </span> 
+                            / {turma.vagas_totais} vagas
+                          </span>
+                        </div>
+                        {/* --------------------------------------- */}
+
                       </div>
-                      <div className="flex items-center gap-2 w-full sm:w-auto border-t border-slate-800 pt-3 sm:border-t-0 sm:pt-0 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto border-t border-slate-800 pt-3 sm:border-t-0 sm:pt-0 sm:opacity-0 group-hover:opacity-100 transition-opacity justify-end">
                         <button onClick={() => abrirModalEdicao(turma)} className="flex-1 sm:flex-none flex justify-center p-2.5 text-slate-400 bg-slate-800 sm:bg-transparent hover:text-white hover:bg-slate-800 rounded-xl transition-all"><Edit2 className="w-4 h-4 sm:w-5 sm:h-5" /></button>
                         <button onClick={() => excluirItem(turma.id, 'turmas')} className="flex-1 sm:flex-none flex justify-center p-2.5 text-slate-400 bg-slate-800 sm:bg-transparent hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 className="w-4 h-4 sm:w-5 sm:h-5" /></button>
                       </div>

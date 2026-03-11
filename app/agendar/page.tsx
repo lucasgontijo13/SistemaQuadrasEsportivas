@@ -52,7 +52,20 @@ export default function AgendarPage() {
       setCarregando(true);
       
       // 1. Busca as turmas
-      const { data: turmasData } = await supabase.from('turmas').select('*');
+      const { data: turmasData, error } = await supabase
+        .from('turmas')
+        .select(`
+          *,
+          matriculas (
+            status,
+            perfis (
+              nome
+            )
+          )
+        `);
+        
+      if (error) console.error("Erro ao buscar turmas:", error);
+      if (turmasData) setTurmas(turmasData);
       if (turmasData) setTurmas(turmasData);
 
       // 2. Busca o usuário logado (Lógica similar à da sua Navbar)
@@ -299,16 +312,56 @@ export default function AgendarPage() {
             {turmasDoDia.map((turma) => (
               <motion.div key={turma.id} variants={item} className="p-5 rounded-2xl border bg-slate-900/80 border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 
-                {/* Informações da Turma Restauradas */}
-                <div className="flex items-center gap-5">
-                  <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold bg-slate-800 text-white">
+                {/* Informações da Turma e Lista de Alunos */}
+                <div className="flex items-start gap-5">
+                  <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold bg-slate-800 text-white mt-1">
                     {turma.horario.substring(0, 5)}
                   </div>
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-bold text-white">{turma.nivel}</h3>
-                    <div className="text-sm text-slate-400 flex items-center gap-1.5">
-                      <Users className="w-4 h-4" /> Prof. {turma.professor}
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-white">{turma.nivel}</h3>
+                      <div className="text-sm text-slate-400 flex items-center gap-1.5 mt-1">
+                        <Users className="w-4 h-4" /> Prof. {turma.professor}
+                      </div>
                     </div>
+
+                    {/* --- NOVA SEÇÃO: AVATARES DOS ALUNOS --- */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex -space-x-2 overflow-hidden">
+                        {turma.matriculas && turma.matriculas.length > 0 ? (
+                          turma.matriculas.map((matricula: any, idx: number) => {
+                            // Pega o primeiro nome para não ficar gigante
+                            const nomeCompleto = matricula.perfis?.nome || "Aluno";
+                            const primeiroNome = nomeCompleto.split(" ")[0];
+                            const inicial = primeiroNome.charAt(0).toUpperCase();
+                            
+                            return (
+                              <div 
+                                key={idx} 
+                                title={primeiroNome} // Mostra o nome ao passar o mouse
+                                className="inline-block h-8 w-8 rounded-full ring-2 ring-slate-900 bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 cursor-help hover:bg-slate-700 transition-colors"
+                              >
+                                {inicial}
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="h-8 flex items-center">
+                            <span className="text-xs text-slate-500 font-medium bg-slate-900/50 px-3 py-1.5 rounded-full border border-slate-800">
+                              Turma vazia
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {turma.matriculas && turma.matriculas.length > 0 && (
+                        <span className="text-xs text-slate-500 font-medium">
+                          {turma.matriculas.length} {turma.matriculas.length === 1 ? 'aluno' : 'alunos'}
+                        </span>
+                      )}
+                    </div>
+                    {/* --------------------------------------- */}
+
                   </div>
                 </div>
 
