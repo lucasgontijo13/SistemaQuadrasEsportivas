@@ -124,7 +124,7 @@ export default function LoginPage() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Sua Senha</label>
-              <Link href="#" className="text-xs font-bold text-orange-500 hover:text-orange-400 transition-colors">Esqueceu a senha?</Link>
+              <Link href="/recuperar-senha" className="text-xs font-bold text-orange-500 hover:text-orange-400 transition-colors">Esqueceu a senha?</Link>
             </div>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">

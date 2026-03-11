@@ -1,10 +1,24 @@
 "use client";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Calendar, Sun, Users } from "lucide-react";
+import { Calendar, Sun, Users, CalendarDays } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 export function Hero() {
+  const [logado, setLogado] = useState(false);
+  const [carregando, setCarregando] = useState(true);
+
+  useEffect(() => {
+    async function verificar() {
+      const { data: { session } } = await supabase.auth.getSession();
+      setLogado(!!session);
+      setCarregando(false);
+    }
+    verificar();
+  }, []);
+  
   return (
     <section className="pt-40 pb-20 px-6 max-w-6xl mx-auto grid lg:grid-cols-2 gap-16 items-center min-h-[90vh]">
       <motion.div 
@@ -35,16 +49,31 @@ export function Hero() {
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 pt-4">
-          <Link href="/agendar" className="w-full sm:w-auto">
-            <motion.button 
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 font-bold py-4 px-8 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-shadow hover:shadow-[0_0_40px_rgba(249,115,22,0.5)]"
-            >
-              <Users className="w-5 h-5" />
-              Agendar Aula
-            </motion.button>
-          </Link>
+          {carregando ? (
+            <div className="w-full sm:w-auto h-14 bg-slate-800 rounded-full animate-pulse"></div>
+          ) : logado ? (
+            <Link href="/agenda" className="w-full sm:w-auto">
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 font-bold py-4 px-8 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-shadow hover:shadow-[0_0_40px_rgba(249,115,22,0.5)]"
+              >
+                <CalendarDays className="w-5 h-5" />
+                Minha Agenda
+              </motion.button>
+            </Link>
+          ) : (
+            <Link href="/agendar" className="w-full sm:w-auto">
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 font-bold py-4 px-8 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-shadow hover:shadow-[0_0_40px_rgba(249,115,22,0.5)]"
+              >
+                <Users className="w-5 h-5" />
+                Agendar Aula Experimental
+              </motion.button>
+            </Link>
+          )}
           
           <Link href="/agendar-quadra" className="w-full sm:w-auto">
             <motion.button 

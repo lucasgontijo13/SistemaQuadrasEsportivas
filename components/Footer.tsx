@@ -1,9 +1,21 @@
 "use client";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Instagram } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 export function Footer() {
+  const [logado, setLogado] = useState(false);
+
+  useEffect(() => {
+    async function verificar() {
+      const { data: { session } } = await supabase.auth.getSession();
+      setLogado(!!session);
+    }
+    verificar();
+  }, []);
+
   return (
     <footer className="py-32 px-6 text-center max-w-3xl mx-auto space-y-10">
       <motion.div
@@ -18,14 +30,13 @@ export function Footer() {
         </p>
         
         <div className="flex justify-center gap-4">
-          <Link href="/agendar">
+          <Link href={logado ? "/agenda" : "/agendar"}>
             <motion.button 
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className="flex items-center gap-3 bg-white text-slate-950 font-bold py-5 px-10 rounded-full transition-all hover:bg-slate-200"
             >
-              Ver Grade de Horários
-              {/* Removemos o text-orange-500 daqui */}
+              {logado ? "Ver Minha Agenda" : "Agendar Aula Experimental"}
               <ArrowRight className="w-6 h-6" />
             </motion.button>
           </Link>

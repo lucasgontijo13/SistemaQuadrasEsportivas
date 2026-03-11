@@ -80,8 +80,6 @@ export function Navbar() {
           ) : usuarioLogado && perfil ? (
             
             <div className="flex items-center gap-3">
-              
-              {/* ATALHO RÁPIDO: Admin ou Professor */}
               {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
                 <Link 
                   href="/admin" 
@@ -191,10 +189,11 @@ export function Navbar() {
             </div>
 
           ) : (
+            /* BOTÕES PARA UTILIZADORES SEM SESSÃO INICIADA */
             <div className="flex items-center gap-4">
               <Link 
                 href="/entrar" 
-                className="bg-orange-500 text-slate-950 px-6 py-2.5 rounded-full font-bold text-sm hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/20 active:scale-95"
+                className="text-sm font-bold text-slate-300 hover:text-white transition-colors border border-slate-800 px-5 py-2.5 rounded-full hover:bg-slate-900"
               >
                 Entrar
               </Link>

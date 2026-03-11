@@ -30,6 +30,9 @@ export default function AgendarPage() {
   const [turmaSelecionada, setTurmaSelecionada] = useState<any>(null);
   const [salvando, setSalvando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
+  const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
+  const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
+  const [perfil, setPerfil] = useState<any>(null); // Agora o 'perfil' existirá!
   
   // Estados para controle de visualização de senha
   const [verSenha, setVerSenha] = useState(false);
@@ -45,13 +48,31 @@ export default function AgendarPage() {
   const [erroAgendamento, setErroAgendamento] = useState("");
 
   useEffect(() => {
-    async function buscarTurmas() {
+    async function carregarDados() {
       setCarregando(true);
-      const { data } = await supabase.from('turmas').select('*');
-      if (data) setTurmas(data);
+      
+      // 1. Busca as turmas
+      const { data: turmasData } = await supabase.from('turmas').select('*');
+      if (turmasData) setTurmas(turmasData);
+
+      // 2. Busca o usuário logado (Lógica similar à da sua Navbar)
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        setUsuarioLogado(session.user);
+
+        const { data: perfilData } = await supabase
+          .from('perfis')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (perfilData) setPerfil(perfilData);
+      }
+
       setCarregando(false);
     }
-    buscarTurmas();
+    carregarDados();
   }, []);
 
   const abrirModal = (turma: any) => {
@@ -276,17 +297,39 @@ export default function AgendarPage() {
         ) : (
           <motion.div className="space-y-4">
             {turmasDoDia.map((turma) => (
-              <motion.div key={turma.id} className="p-5 rounded-2xl border bg-slate-900/80 border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+              <motion.div key={turma.id} variants={item} className="p-5 rounded-2xl border bg-slate-900/80 border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                
+                {/* Informações da Turma Restauradas */}
                 <div className="flex items-center gap-5">
-                  <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold bg-slate-800 text-white">{turma.horario.substring(0, 5)}</div>
+                  <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold bg-slate-800 text-white">
+                    {turma.horario.substring(0, 5)}
+                  </div>
                   <div className="space-y-1">
                     <h3 className="text-lg font-bold text-white">{turma.nivel}</h3>
-                    <div className="text-sm text-slate-400 flex items-center gap-1.5"><Users className="w-4 h-4" /> Prof. {turma.professor}</div>
+                    <div className="text-sm text-slate-400 flex items-center gap-1.5">
+                      <Users className="w-4 h-4" /> Prof. {turma.professor}
+                    </div>
                   </div>
                 </div>
-                <button onClick={() => abrirModal(turma)} className="px-8 py-3 rounded-full font-bold text-sm bg-white text-slate-950 hover:bg-slate-200 shadow-lg">
-                  Fazer Aula Experimental
-                </button>
+
+                {/* Botões Dinâmicos */}
+                <div className="flex flex-col items-end gap-1">
+                  {perfil?.tipo === 'aluno' ? (
+                    // Se já for aluno
+                    <>
+                      <span className="text-orange-500 font-bold text-xs uppercase tracking-widest">Você já é Aluno</span>
+                      <Link href="/agenda" className="text-[10px] text-slate-500 hover:text-white underline">Ver minha agenda</Link>
+                    </>
+                  ) : (
+                    // Se for visitante
+                    <button 
+                      onClick={() => abrirModal(turma)} 
+                      className="w-full sm:w-auto px-8 py-3 rounded-full font-bold text-sm transition-all bg-white text-slate-950 hover:bg-slate-200 active:scale-95 shadow-lg"
+                    >
+                      Fazer Aula Experimental
+                    </button>
+                  )}
+                </div>
               </motion.div>
             ))}
           </motion.div>
