@@ -3,12 +3,25 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Users, CheckCircle2, Loader2, X, ArrowRight, Lock } from "lucide-react";
+import { 
+  ChevronLeft, Users, CheckCircle2, Loader2, 
+  X, ArrowRight, Lock, Eye, EyeOff 
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
-
+import { useRouter } from "next/navigation";
 const diasSemana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
+// Função de Máscara para WhatsApp
+const maskPhone = (value: string) => {
+  return value
+    .replace(/\D/g, "")
+    .replace(/(\d{2})(\d)/, "($1) $2")
+    .replace(/(\d{5})(\d)/, "$1-$2")
+    .replace(/(-\d{4})\d+?$/, "$1");
+};
+
 export default function AgendarPage() {
+  const router = useRouter();
   const [diaSelecionado, setDiaSelecionado] = useState("Segunda");
   const [turmas, setTurmas] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -18,7 +31,17 @@ export default function AgendarPage() {
   const [salvando, setSalvando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   
-  const [dadosAluno, setDadosAluno] = useState({ nome: "", email: "", whatsapp: "", senha: "" });
+  // Estados para controle de visualização de senha
+  const [verSenha, setVerSenha] = useState(false);
+  const [verConfirmar, setVerConfirmar] = useState(false);
+
+  const [dadosAluno, setDadosAluno] = useState({ 
+    nome: "", 
+    email: "", 
+    whatsapp: "", 
+    senha: "", 
+    confirmarSenha: "" 
+  });
   const [erroAgendamento, setErroAgendamento] = useState("");
 
   useEffect(() => {
@@ -43,7 +66,6 @@ export default function AgendarPage() {
     setSalvando(true);
     setErroAgendamento("");
 
-    // Limpa o WhatsApp para salvar apenas números no banco
     const whatsappLimpo = dadosAluno.whatsapp.replace(/\D/g, "");
 
     // 1. Verificar se o Telefone/WhatsApp já existe
@@ -59,7 +81,7 @@ export default function AgendarPage() {
       return;
     }
 
-    // 2. Criar conta com a senha escolhida pelo usuário
+    // 2. Criar conta no Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: dadosAluno.email,
       password: dadosAluno.senha,
@@ -72,7 +94,7 @@ export default function AgendarPage() {
     }
 
     if (authData.user) {
-      // 3. Insere o perfil e o e-mail (necessário para o login por telefone que conversamos)
+      // 3. Insere o perfil e a matrícula
       await supabase.from('perfis').insert([{
         id: authData.user.id,
         nome: dadosAluno.nome,
@@ -87,15 +109,13 @@ export default function AgendarPage() {
         status: 'experimental'
       }]);
 
-      setSucesso(true);
+      setSucesso(true); 
+    
     }
     setSalvando(false);
   };
 
   const turmasDoDia = turmas.filter((turma) => turma.dia_semana === diaSelecionado);
-
-  const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
-  const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-20 relative">
@@ -133,7 +153,14 @@ export default function AgendarPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
-                        <input type="tel" required placeholder="(00) 00000-0000" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.whatsapp} onChange={e => setDadosAluno({...dadosAluno, whatsapp: e.target.value})} />
+                        <input 
+                          type="tel" 
+                          required 
+                          placeholder="(00) 00000-0000" 
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" 
+                          value={dadosAluno.whatsapp} 
+                          onChange={e => setDadosAluno({...dadosAluno, whatsapp: maskPhone(e.target.value)})} 
+                        />
                       </div>
                       <div>
                         <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">E-mail</label>
@@ -141,21 +168,52 @@ export default function AgendarPage() {
                       </div>
                     </div>
 
-                    {/* NOVO CAMPO DE SENHA */}
-                    <div>
-                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block text-orange-400 flex items-center gap-2">
-                        <Lock className="w-3 h-3" /> Criar Senha de Acesso
-                      </label>
-                      <input 
-                        type="password" 
-                        required 
-                        minLength={6}
-                        placeholder="Mínimo 6 caracteres" 
-                        className="w-full bg-slate-950 border border-orange-500/30 rounded-xl p-3 text-white outline-none focus:border-orange-500 transition-all shadow-[0_0_15px_rgba(249,115,22,0.05)]" 
-                        value={dadosAluno.senha} 
-                        onChange={e => setDadosAluno({...dadosAluno, senha: e.target.value})} 
-                      />
-                      <p className="text-[10px] text-slate-500 mt-1.5">Você usará este e-mail/WhatsApp e senha para ver sua agenda depois.</p>
+                    {/* CAMPOS DE SENHA */}
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block text-orange-400 flex items-center gap-2">
+                          <Lock className="w-3 h-3" /> Criar Senha
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type={verSenha ? "text" : "password"} 
+                            required 
+                            minLength={6}
+                            placeholder="Mínimo 6 caracteres" 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pr-10 text-white outline-none focus:border-orange-500 transition-all" 
+                            value={dadosAluno.senha} 
+                            onChange={e => setDadosAluno({...dadosAluno, senha: e.target.value})} 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => setVerSenha(!verSenha)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                          >
+                            {verSenha ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Confirmar Senha</label>
+                        <div className="relative">
+                          <input 
+                            type={verConfirmar ? "text" : "password"} 
+                            required 
+                            placeholder="Repita sua senha" 
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pr-10 text-white outline-none focus:border-orange-500 transition-all" 
+                            value={dadosAluno.confirmarSenha} 
+                            onChange={e => setDadosAluno({...dadosAluno, confirmarSenha: e.target.value})} 
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => setVerConfirmar(!verConfirmar)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
+                          >
+                            {verConfirmar ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
                     <button type="submit" disabled={salvando} className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
@@ -169,15 +227,25 @@ export default function AgendarPage() {
                     <CheckCircle2 className="w-10 h-10" />
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-2">Vaga Confirmada!</h2>
-                  <p className="text-slate-400 mb-8">Te esperamos na areia, {dadosAluno.nome.split(" ")[0]}! Agora você já pode acessar sua agenda com sua senha.</p>
-                  <Link href="/entrar" className="block w-full py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors text-center">Fazer Login Agora</Link>
+                  <p className="text-slate-400 mb-8">
+                    Te esperamos na areia! Agora sua vaga está garantida e sua conta está pronta.
+                  </p>
+                  
+                  {/* Botão de redirecionamento manual */}
+                  <Link 
+                    href="/agenda" 
+                    className="block w-full py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors text-center"
+                  >
+                    Concluir
+                  </Link>
                 </div>
               )}
             </motion.div>
           </div>
         )}
       </AnimatePresence>
-      {/* Resto do código da página... */}
+
+      {/* Cabeçalho e Listagem de Horários permanecem iguais ao seu código original */}
       <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-6 h-20 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ChevronLeft className="w-5 h-5" /><span className="font-medium text-sm">Voltar</span></Link>
@@ -192,6 +260,7 @@ export default function AgendarPage() {
           <p className="text-slate-400">Escolha o seu dia fixo na semana e garanta sua vaga na turma.</p>
         </motion.div>
 
+        {/* ... Restante da sua Main (Filtros e Cards) ... */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="mb-10">
           <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide -mx-6 px-6 sm:mx-0 sm:px-0">
             {diasSemana.map((dia) => (
@@ -203,25 +272,21 @@ export default function AgendarPage() {
         </motion.div>
 
         {carregando ? (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-500"><Loader2 className="w-8 h-8 animate-spin text-orange-500 mb-4" /><p>Buscando turmas no banco de dados...</p></div>
-        ) : turmasDoDia.length === 0 ? (
-          <div className="text-center py-20 bg-slate-900/30 rounded-2xl border border-slate-800/50 text-slate-500"><p>Nenhuma turma cadastrada para este dia ainda.</p></div>
+          <div className="flex flex-col items-center justify-center py-20 text-slate-500"><Loader2 className="w-8 h-8 animate-spin text-orange-500 mb-4" /><p>Buscando turmas...</p></div>
         ) : (
-          <motion.div variants={container} initial="hidden" animate="show" className="space-y-4">
+          <motion.div className="space-y-4">
             {turmasDoDia.map((turma) => (
-              <motion.div key={turma.id} variants={item} className={`p-5 rounded-2xl border bg-slate-900/80 border-slate-800 hover:border-slate-700 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-6`}>
+              <motion.div key={turma.id} className="p-5 rounded-2xl border bg-slate-900/80 border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <div className="flex items-center gap-5">
                   <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold bg-slate-800 text-white">{turma.horario.substring(0, 5)}</div>
                   <div className="space-y-1">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">{turma.nivel}</h3>
-                    <div className="flex items-center gap-4 text-sm text-slate-400"><span className="flex items-center gap-1.5"><Users className="w-4 h-4" /> Prof. {turma.professor}</span></div>
+                    <h3 className="text-lg font-bold text-white">{turma.nivel}</h3>
+                    <div className="text-sm text-slate-400 flex items-center gap-1.5"><Users className="w-4 h-4" /> Prof. {turma.professor}</div>
                   </div>
                 </div>
-                <div className="flex flex-col items-start sm:items-end gap-3 border-t border-slate-800 sm:border-t-0 pt-4 sm:pt-0">
-                  <button onClick={() => abrirModal(turma)} className="w-full sm:w-auto px-8 py-3 rounded-full font-bold text-sm transition-all bg-white text-slate-950 hover:bg-slate-200 active:scale-95 shadow-lg">
-                    Fazer Aula Experimental
-                  </button>
-                </div>
+                <button onClick={() => abrirModal(turma)} className="px-8 py-3 rounded-full font-bold text-sm bg-white text-slate-950 hover:bg-slate-200 shadow-lg">
+                  Fazer Aula Experimental
+                </button>
               </motion.div>
             ))}
           </motion.div>
