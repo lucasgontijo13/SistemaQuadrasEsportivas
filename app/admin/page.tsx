@@ -26,8 +26,8 @@ export default function AdminDashboard() {
   const [novaTurma, setNovaTurma] = useState({ dia_semana: "Segunda", horario: "18:00", nivel: "Iniciante", professor: "João Paulo", vagas_totais: 6 });
   const [novoHorarioQuadra, setNovoHorarioQuadra] = useState({ dia_semana: "Sábado", horario_inicio: "08:00", horario_fim: "09:00", preco: "R$ 80,00" });
   
-  const [dadosEfetivacao, setDadosEfetivacao] = useState<{ matriculaId: number, perfilId: string, nomeAluno: string, nivel: string, turmasIds: number[] }>({ 
-    matriculaId: 0, perfilId: "", nomeAluno: "", nivel: "Iniciante", turmasIds: [] 
+  const [dadosEfetivacao, setDadosEfetivacao] = useState<{ matriculaId: number, perfilId: string, nomeAluno: string, nivel: string, turmasIds: number[], cadastroCompleto: boolean }>({ 
+    matriculaId: 0, perfilId: "", nomeAluno: "", nivel: "Iniciante", turmasIds: [], cadastroCompleto: false 
   });
   
   const [diaFiltroModal, setDiaFiltroModal] = useState("Segunda");
@@ -35,7 +35,8 @@ export default function AdminDashboard() {
 
   const buscarDados = async () => {
     setCarregando(true);
-    const { data: dadosMatriculas } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis(id, nome, nivel), turmas(id, dia_semana, horario)`).order('created_at', { ascending: false });
+    // MUDANÇA: Buscando CPF, data e contato para saber se o cadastro está completo
+    const { data: dadosMatriculas } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis(id, nome, nivel, cpf, data_nascimento, contato_emergencia), turmas(id, dia_semana, horario)`).order('created_at', { ascending: false });
     if (dadosMatriculas) setMatriculas(dadosMatriculas);
 
     const { data: dadosTurmas } = await supabase.from('turmas').select('*').order('id', { ascending: true });
@@ -48,16 +49,13 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     async function verificarAcessoEBuscarDados() {
-      // 1. Quem é o usuário logado agora?
       const { data: authData } = await supabase.auth.getUser();
       
       if (!authData.user) {
-        // Ninguém logado? Vai pra home.
         router.push("/");
         return;
       }
 
-      // 2. Qual é o tipo desse usuário na nossa tabela de perfis?
       const { data: perfil } = await supabase
         .from('perfis')
         .select('tipo')
@@ -65,37 +63,30 @@ export default function AdminDashboard() {
         .single();
 
       if (!perfil || (perfil.tipo !== 'admin' && perfil.tipo !== 'professor')) {
-        // É um aluno tentando dar uma de espertinho? Expulsa pra home.
         alert("Acesso negado. Área restrita para professores.");
         router.push("/");
         return;
       }
 
-      // 3. Se chegou aqui, ele é admin/professor! Libera a tela e busca os dados.
       setAutorizado(true);
-      
-      setCarregando(true);
-      const { data: dadosMatriculas } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis(id, nome, nivel), turmas(id, dia_semana, horario)`).order('created_at', { ascending: false });
-      if (dadosMatriculas) setMatriculas(dadosMatriculas);
-
-      const { data: dadosTurmas } = await supabase.from('turmas').select('*').order('id', { ascending: true });
-      if (dadosTurmas) setTurmas(dadosTurmas);
-
-      const { data: dadosQuadra } = await supabase.from('horarios_quadra').select('*').order('id', { ascending: true });
-      if (dadosQuadra) setHorariosQuadra(dadosQuadra);
-      setCarregando(false);
+      buscarDados();
     }
     
     verificarAcessoEBuscarDados();
   }, [router]);
 
   const abrirModalEfetivar = (mat: any) => {
+    // Verifica se ele já tem os dados fiscais preenchidos
+    const p = mat.perfis;
+    const isCompleto = p?.cpf && p?.data_nascimento && p?.contato_emergencia;
+
     setDadosEfetivacao({
       matriculaId: mat.id,
-      perfilId: mat.perfil_id || mat.perfis?.id,
-      nomeAluno: mat.perfis?.nome || "Aluno",
-      nivel: mat.perfis?.nivel || "Iniciante",
-      turmasIds: [mat.turma_id || mat.turmas?.id] 
+      perfilId: mat.perfil_id || p?.id,
+      nomeAluno: p?.nome || "Aluno",
+      nivel: p?.nivel || "Iniciante",
+      turmasIds: [mat.turma_id || mat.turmas?.id],
+      cadastroCompleto: !!isCompleto
     });
     setDiaFiltroModal(mat.turmas?.dia_semana || "Segunda"); 
     setTipoModal("efetivar_aluno");
@@ -134,16 +125,53 @@ export default function AdminDashboard() {
         setCarregando(false);
         return;
       }
-      await supabase.from('perfis').update({ nivel: dadosEfetivacao.nivel }).eq('id', dadosEfetivacao.perfilId);
-      await supabase.from('matriculas').delete().eq('id', dadosEfetivacao.matriculaId);
+
+      // 1. Atualiza o nível do aluno na tabela 'perfis'
+      const { error: erroPerfil } = await supabase
+        .from('perfis')
+        .update({ nivel: dadosEfetivacao.nivel })
+        .eq('id', dadosEfetivacao.perfilId);
+        
+      if (erroPerfil) {
+        alert("Erro ao atualizar o perfil: " + erroPerfil.message);
+        setCarregando(false);
+        return;
+      }
       
-      const novasMatriculas = dadosEfetivacao.turmasIds.map(tId => ({
-        perfil_id: dadosEfetivacao.perfilId,
-        turma_id: tId,
-        status: 'ativo'
-      }));
-      await supabase.from('matriculas').insert(novasMatriculas);
+      // 2. MÁQUINA DE ESTADOS: Define o status com base no preenchimento do perfil
+      const statusDestino = dadosEfetivacao.cadastroCompleto ? 'aguardando_pagamento' : 'aguardando_dados';
+
+      // 3. ATUALIZA A MATRÍCULA EXISTENTE
+      // Usamos o matriculaId que já temos para mudar o status e a turma definitiva
+      const { error: erroUpdate } = await supabase
+        .from('matriculas')
+        .update({ 
+          status: statusDestino,
+          turma_id: dadosEfetivacao.turmasIds[0] // Assume a primeira turma selecionada como a principal
+        })
+        .eq('id', dadosEfetivacao.matriculaId);
+      
+      if (erroUpdate) {
+        console.error("ERRO AO ATUALIZAR MATRÍCULA:", erroUpdate);
+        alert(`Erro ao efetivar: ${erroUpdate.message}`);
+        setCarregando(false);
+        return;
+      }
+
+      // 4. Se o professor escolheu MAIS de uma turma para o mesmo aluno
+      // (Ex: Aluno vai treinar Terça e Quinta), criamos as extras:
+      if (dadosEfetivacao.turmasIds.length > 1) {
+        const turmasExtras = dadosEfetivacao.turmasIds.slice(1).map(tId => ({
+          perfil_id: dadosEfetivacao.perfilId,
+          turma_id: tId,
+          status: statusDestino
+        }));
+        
+        await supabase.from('matriculas').insert(turmasExtras);
+      }
+      
       buscarDados();
+      setModalAberto(false);
     }
     setModalAberto(false);
   };
@@ -178,13 +206,11 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-24 relative">
       
-      {/* MODAL FLUTUANTE CENTRALIZADO */}
       <AnimatePresence>
         {modalAberto && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setModalAberto(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
             
-            {/* Agora ele nasce sempre do centro, com as bordas todas arredondadas e flutuando */}
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
@@ -331,7 +357,6 @@ export default function AdminDashboard() {
           <p className="text-sm sm:text-base text-slate-400 mt-1">Gerencie alunos e horários.</p>
         </div>
 
-        {/* ABAS COM ROLAGEM HORIZONTAL NO CELULAR */}
         <div className="flex bg-slate-900 p-1 rounded-xl mb-8 border border-slate-800 max-w-3xl overflow-x-auto scrollbar-hide">
           <button onClick={() => setAbaAtiva("alunos")} className={`flex-shrink-0 flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "alunos" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}><Users className="w-4 h-4" /> Alunos</button>
           <button onClick={() => setAbaAtiva("turmas")} className={`flex-shrink-0 flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "turmas" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}><CalendarDays className="w-4 h-4" /> Turmas</button>
@@ -353,10 +378,13 @@ export default function AdminDashboard() {
                         <div className="flex items-center gap-3 sm:gap-4">
                           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 flex-shrink-0">{mat.perfis?.nome?.charAt(0) || "?"}</div>
                           <div>
+                            {/* MUDANÇA: Etiquetas coloridas representando o Funil/Máquina de Estados */}
                             <h3 className="font-bold text-white flex flex-wrap items-center gap-2 text-sm sm:text-base leading-tight">
                               {mat.perfis?.nome || "Aluno"}
-                              {mat.status === "experimental" && <span className="text-[9px] sm:text-[10px] bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded-full uppercase">Exp.</span>}
-                              {mat.status === "ativo" && <span className="text-[9px] sm:text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full uppercase">Ativo</span>}
+                              {mat.status === "experimental" && <span className="text-[9px] sm:text-[10px] bg-orange-500/10 border border-orange-500/20 text-orange-500 px-2 py-0.5 rounded-md uppercase">Experimental</span>}
+                              {mat.status === "aguardando_dados" && <span className="text-[9px] sm:text-[10px] bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-md uppercase">Aguardando Dados</span>}
+                              {mat.status === "aguardando_pagamento" && <span className="text-[9px] sm:text-[10px] bg-sky-500/10 border border-sky-500/20 text-sky-400 px-2 py-0.5 rounded-md uppercase">Aguardando Pgto</span>}
+                              {mat.status === "ativo" && <span className="text-[9px] sm:text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded-md uppercase">Ativo</span>}
                             </h3>
                             <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                               Nível {mat.perfis?.nivel || "N/A"} • {mat.turmas?.dia_semana.substring(0,3)} às {mat.turmas?.horario?.substring(0,5)}
@@ -364,7 +392,6 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                         
-                        {/* Botões empilhados no celular, alinhados no PC */}
                         <div className="flex items-center gap-2 w-full sm:w-auto border-t border-slate-800 pt-3 sm:border-t-0 sm:pt-0">
                           {mat.status === "experimental" && (
                             <button onClick={() => abrirModalEfetivar(mat)} className="flex-1 sm:flex-none justify-center px-4 py-2 sm:py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-emerald-600 transition-colors flex items-center gap-2"><UserCheck className="w-4 h-4" /> Efetivar</button>

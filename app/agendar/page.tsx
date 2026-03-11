@@ -19,6 +19,8 @@ export default function AgendarPage() {
   const [sucesso, setSucesso] = useState(false);
   
   const [dadosAluno, setDadosAluno] = useState({ nome: "", email: "", whatsapp: "" });
+  const [erroAgendamento, setErroAgendamento] = useState("");
+
 
   useEffect(() => {
     async function buscarTurmas() {
@@ -33,17 +35,31 @@ export default function AgendarPage() {
   const abrirModal = (turma: any) => {
     setTurmaSelecionada(turma);
     setSucesso(false);
+    setErroAgendamento(""); // Limpa os erros antigos ao abrir o modal
     setModalAberto(true);
   };
 
   const confirmarAgendamento = async (e: React.FormEvent) => {
     e.preventDefault();
     setSalvando(true);
+    setErroAgendamento("");
 
+    // 1. Tenta criar o usuário no Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: dadosAluno.email,
       password: `Arena${dadosAluno.whatsapp}`
     });
+
+    // SE O E-MAIL JÁ EXISTIR, O SUPABASE GERA UM ERRO AQUI!
+    if (authError) {
+      if (authError.message.includes('registered') || authError.status === 422) {
+        setErroAgendamento("Este e-mail já está cadastrado! Você já realizou uma aula experimental. Por favor, faça login no sistema.");
+      } else {
+        setErroAgendamento("Ocorreu um erro inesperado: " + authError.message);
+      }
+      setSalvando(false);
+      return; // Trava o código aqui, não deixa ir pro banco de dados
+    }
 
     if (authData.user) {
       await supabase.from('perfis').insert([{
@@ -60,8 +76,6 @@ export default function AgendarPage() {
       }]);
 
       setSucesso(true);
-    } else {
-      alert("Erro ao agendar. Tente novamente.");
     }
     setSalvando(false);
   };
@@ -93,6 +107,11 @@ export default function AgendarPage() {
                   <p className="text-slate-400 text-sm mb-6">Turma de {turmaSelecionada.dia_semana} às {turmaSelecionada.horario.substring(0,5)}</p>
 
                   <form onSubmit={confirmarAgendamento} className="space-y-4">
+                    {erroAgendamento && (
+                      <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-sm font-medium mb-4">
+                        {erroAgendamento}
+                      </div>
+                    )}
                     <div>
                       <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nome Completo</label>
                       <input type="text" required placeholder="Ex: Lucas Silva" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.nome} onChange={e => setDadosAluno({...dadosAluno, nome: e.target.value})} />

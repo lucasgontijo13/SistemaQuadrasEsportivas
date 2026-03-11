@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { User as UserIcon, LogOut, Loader2, ShieldCheck } from "lucide-react";
+import { User as UserIcon, LogOut, Loader2, ShieldCheck, CalendarDays } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export function Navbar() {
@@ -92,6 +92,9 @@ export function Navbar() {
                         <p className="text-sm font-bold text-white">{perfil.nome}</p>
                         <p className="text-[10px] text-orange-400 uppercase tracking-wider font-bold">{perfil.tipo}</p>
                       </div>
+                      <Link href="/agenda" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
+                        <CalendarDays className="w-4 h-4" /> Minha Agenda
+                      </Link>
 
                       <Link href="/perfil" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <UserIcon className="w-4 h-4" /> Meu Perfil

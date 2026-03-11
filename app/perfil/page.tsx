@@ -108,8 +108,7 @@ export default function PerfilPage() {
       return;
     }
 
-    // 2. VALIDAÇÃO DE EMERGÊNCIA (NÃO PODE SER IGUAL)
-    // Tiramos tudo que não é número para comparar apenas os dígitos reais
+    // 2. VALIDAÇÃO DE EMERGÊNCIA
     const zapApenasNumeros = perfil.whatsapp.replace(/\D/g, "");
     const emergenciaApenasNumeros = perfil.contato_emergencia.replace(/\D/g, "");
     
@@ -121,8 +120,8 @@ export default function PerfilPage() {
 
     const dataFormatada = perfil.data_nascimento ? perfil.data_nascimento : null;
 
-    // 3. SALVANDO NO BANCO
-    const { error } = await supabase
+    // 3. SALVANDO NO BANCO DE DADOS (PERFIL)
+    const { error: erroPerfil } = await supabase
       .from('perfis')
       .update({
         nome: perfil.nome,
@@ -133,12 +132,28 @@ export default function PerfilPage() {
       })
       .eq('id', perfil.id);
 
-    if (error) {
-      console.error("ERRO DETALHADO SUPABASE:", error);
-      setMensagem({ tipo: "erro", texto: `Falha: ${error.message} (Código: ${error.code})` });
-    } else {
-      setMensagem({ tipo: "sucesso", texto: "Perfil atualizado com sucesso!" });
+    if (erroPerfil) {
+      console.error("ERRO DETALHADO SUPABASE:", erroPerfil);
+      setMensagem({ tipo: "erro", texto: `Falha: ${erroPerfil.message} (Código: ${erroPerfil.code})` });
+      setSalvando(false);
+      return;
     }
+
+    // 4. A MÁQUINA DE ESTADOS (A MÁGICA ACONTECE AQUI)
+    // Se ele preencheu tudo, o cadastro está completo
+    const cadastroCompleto = perfil.cpf && perfil.data_nascimento && perfil.contato_emergencia;
+
+    if (cadastroCompleto) {
+      // Procura todas as matrículas dele que estão travadas em 'aguardando_dados' 
+      // e avança elas para 'aguardando_pagamento'
+      await supabase
+        .from('matriculas')
+        .update({ status: 'aguardando_pagamento' })
+        .eq('perfil_id', perfil.id)
+        .eq('status', 'aguardando_dados');
+    }
+
+    setMensagem({ tipo: "sucesso", texto: "Perfil atualizado com sucesso!" });
     setSalvando(false);
   };
 
