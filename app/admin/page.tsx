@@ -1,5 +1,5 @@
 "use client";
-
+import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -10,6 +10,8 @@ import {
 import { supabase } from "@/lib/supabase";
 
 export default function AdminDashboard() {
+  const router = useRouter();
+  const [autorizado, setAutorizado] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel">("alunos");
   
   const [matriculas, setMatriculas] = useState<any[]>([]);
@@ -45,8 +47,47 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    buscarDados();
-  }, []);
+    async function verificarAcessoEBuscarDados() {
+      // 1. Quem é o usuário logado agora?
+      const { data: authData } = await supabase.auth.getUser();
+      
+      if (!authData.user) {
+        // Ninguém logado? Vai pra home.
+        router.push("/");
+        return;
+      }
+
+      // 2. Qual é o tipo desse usuário na nossa tabela de perfis?
+      const { data: perfil } = await supabase
+        .from('perfis')
+        .select('tipo')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (!perfil || (perfil.tipo !== 'admin' && perfil.tipo !== 'professor')) {
+        // É um aluno tentando dar uma de espertinho? Expulsa pra home.
+        alert("Acesso negado. Área restrita para professores.");
+        router.push("/");
+        return;
+      }
+
+      // 3. Se chegou aqui, ele é admin/professor! Libera a tela e busca os dados.
+      setAutorizado(true);
+      
+      setCarregando(true);
+      const { data: dadosMatriculas } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis(id, nome, nivel), turmas(id, dia_semana, horario)`).order('created_at', { ascending: false });
+      if (dadosMatriculas) setMatriculas(dadosMatriculas);
+
+      const { data: dadosTurmas } = await supabase.from('turmas').select('*').order('id', { ascending: true });
+      if (dadosTurmas) setTurmas(dadosTurmas);
+
+      const { data: dadosQuadra } = await supabase.from('horarios_quadra').select('*').order('id', { ascending: true });
+      if (dadosQuadra) setHorariosQuadra(dadosQuadra);
+      setCarregando(false);
+    }
+    
+    verificarAcessoEBuscarDados();
+  }, [router]);
 
   const abrirModalEfetivar = (mat: any) => {
     setDadosEfetivacao({
@@ -131,7 +172,9 @@ export default function AdminDashboard() {
   const item = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } };
 
   const turmasFiltradasNoModal = turmas.filter(t => t.dia_semana === diaFiltroModal);
-
+  if (!autorizado) {
+    return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
+  }
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-24 relative">
       

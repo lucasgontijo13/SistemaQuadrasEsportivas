@@ -1,143 +1,140 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Mail, Lock, User, ArrowRight } from "lucide-react";
+import { motion } from "framer-motion";
+import { Mail, Lock, Loader2, ArrowRight, AlertCircle, ChevronLeft } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
-export default function EntrarPage() {
-  // Estado para controlar se mostra "login" ou "cadastro"
-  const [modo, setModo] = useState<"login" | "cadastro">("login");
+export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [senha, setSenha] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const fazerLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCarregando(true);
+    setErro("");
+
+    // 1. Tenta autenticar o usuário no Supabase
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password: senha,
+    });
+
+    if (authError) {
+      setErro("E-mail ou senha incorretos. Tente novamente.");
+      setCarregando(false);
+      return;
+    }
+
+    // 2. Se a senha bater, vamos descobrir qual é o cargo dele (tipo)
+    if (authData.user) {
+      const { data: perfil } = await supabase
+        .from('perfis')
+        .select('tipo')
+        .eq('id', authData.user.id)
+        .single();
+
+      // 3. A mágica do redirecionamento inteligente
+      if (perfil?.tipo === 'admin' || perfil?.tipo === 'professor') {
+        router.push("/admin"); // Joga pro painel de controle
+      } else {
+        router.push("/"); // Se for aluno, vai pra tela inicial
+      }
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white flex flex-col">
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-orange-500 selection:text-white relative">
       
-      {/* Header Simples */}
-      <header className="p-6">
-        <Link href="/agendar" className="inline-flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+      {/* Botão de Voltar discreto no topo */}
+      <div className="absolute top-6 sm:top-10 left-6 sm:left-10">
+        <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
           <ChevronLeft className="w-5 h-5" />
-          <span className="font-medium text-sm">Voltar para horários</span>
+          <span className="font-medium text-sm">Voltar</span>
         </Link>
-      </header>
+      </div>
 
-      {/* Container Principal */}
-      <main className="flex-1 flex items-center justify-center p-6">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-md bg-slate-900/50 backdrop-blur-xl border border-slate-800 p-8 rounded-[2rem] shadow-2xl relative overflow-hidden"
-        >
-          {/* Efeito de luz no fundo do card */}
-          <div className="absolute -top-20 -right-20 w-40 h-40 bg-orange-500/10 blur-[50px] rounded-full pointer-events-none" />
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        className="w-full max-w-md"
+      >
+        <div className="text-center mb-10">
+          <div className="font-bold text-3xl tracking-tighter text-white mb-2">
+            Arena<span className="text-orange-500">.Pro</span>
+          </div>
+          <p className="text-slate-400 text-sm">Acesse sua conta para continuar.</p>
+        </div>
 
-          {/* Logo Centralizada */}
-          <div className="text-center mb-8">
-            <div className="font-black text-3xl tracking-tighter text-white mb-2">
-              Arena<span className="text-orange-500">.Pro</span>
+        <form onSubmit={fazerLogin} className="bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-[2rem] shadow-2xl space-y-5">
+          
+          {/* Mensagem de Erro (Só aparece se errar a senha) */}
+          {erro && (
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm font-medium">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <p>{erro}</p>
+            </motion.div>
+          )}
+
+          <div>
+            <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Seu E-mail</label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
+                <Mail className="w-5 h-5" />
+              </div>
+              <input 
+                type="email" 
+                required 
+                placeholder="exemplo@email.com" 
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-11 pr-4 text-white outline-none focus:border-orange-500 transition-colors"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
-            <p className="text-slate-400 text-sm">
-              {modo === "login" ? "Bem-vindo de volta à areia." : "Sua jornada começa aqui."}
-            </p>
           </div>
 
-          {/* Abas de Alternância */}
-          <div className="flex bg-slate-950 p-1 rounded-xl mb-8 border border-slate-800">
-            <button
-              onClick={() => setModo("login")}
-              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${
-                modo === "login" 
-                  ? "bg-slate-800 text-white shadow-sm" 
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              Entrar
-            </button>
-            <button
-              onClick={() => setModo("cadastro")}
-              className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${
-                modo === "cadastro" 
-                  ? "bg-slate-800 text-white shadow-sm" 
-                  : "text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              Criar Conta
-            </button>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Sua Senha</label>
+              <Link href="#" className="text-xs font-bold text-orange-500 hover:text-orange-400 transition-colors">Esqueceu a senha?</Link>
+            </div>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
+                <Lock className="w-5 h-5" />
+              </div>
+              <input 
+                type="password" 
+                required 
+                placeholder="••••••••" 
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-11 pr-4 text-white outline-none focus:border-orange-500 transition-colors"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+              />
+            </div>
           </div>
 
-          {/* Formulário com animação de troca */}
-          <AnimatePresence mode="wait">
-            <motion.form
-              key={modo}
-              initial={{ opacity: 0, x: modo === "login" ? -20 : 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: modo === "login" ? 20 : -20 }}
-              transition={{ duration: 0.2 }}
-              className="space-y-4"
-              onSubmit={(e) => e.preventDefault()}
-            >
-              {/* Campo Nome (Aparece só no cadastro) */}
-              {modo === "cadastro" && (
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium text-slate-300 pl-1">Nome Completo</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
-                      <User className="w-5 h-5" />
-                    </div>
-                    <input 
-                      type="text" 
-                      placeholder="Ex: Lucas Silva"
-                      className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl pl-11 pr-4 py-3.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all placeholder:text-slate-600"
-                    />
-                  </div>
-                </div>
-              )}
+          <button 
+            type="submit" 
+            disabled={carregando} 
+            className="w-full mt-2 py-4 bg-orange-500 text-slate-950 font-bold rounded-xl hover:bg-orange-600 transition-colors shadow-lg shadow-orange-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {carregando ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <>Entrar no Sistema <ArrowRight className="w-5 h-5" /></>
+            )}
+          </button>
+        </form>
 
-              {/* Campo Email */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-300 pl-1">E-mail</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
-                    <Mail className="w-5 h-5" />
-                  </div>
-                  <input 
-                    type="email" 
-                    placeholder="seu@email.com"
-                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl pl-11 pr-4 py-3.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all placeholder:text-slate-600"
-                  />
-                </div>
-              </div>
-
-              {/* Campo Senha */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center pr-1">
-                  <label className="text-sm font-medium text-slate-300 pl-1">Senha</label>
-                  {modo === "login" && (
-                    <a href="#" className="text-xs text-orange-500 hover:text-orange-400 font-medium">Esqueceu?</a>
-                  )}
-                </div>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
-                    <Lock className="w-5 h-5" />
-                  </div>
-                  <input 
-                    type="password" 
-                    placeholder="••••••••"
-                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl pl-11 pr-4 py-3.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all placeholder:text-slate-600"
-                  />
-                </div>
-              </div>
-
-              {/* Botão de Submit */}
-              <button className="w-full bg-orange-500 hover:bg-orange-600 text-slate-950 font-bold py-4 rounded-xl mt-6 transition-colors flex items-center justify-center gap-2 group">
-                {modo === "login" ? "Entrar na Plataforma" : "Criar Minha Conta"}
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-              
-            </motion.form>
-          </AnimatePresence>
-
-        </motion.div>
-      </main>
+        <p className="text-center text-slate-500 text-sm mt-8">
+          Ainda não tem conta? <Link href="/agendar" className="text-orange-500 font-bold hover:underline">Agende uma aula</Link>
+        </p>
+      </motion.div>
     </div>
   );
 }
