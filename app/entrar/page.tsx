@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Mail, Lock, Loader2, ArrowRight, AlertCircle, ChevronLeft } from "lucide-react";
+import { Mail, Lock, Loader2, ArrowRight, AlertCircle, ChevronLeft, Phone } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
@@ -19,19 +19,41 @@ export default function LoginPage() {
     setCarregando(true);
     setErro("");
 
-    // 1. Tenta autenticar o usuário no Supabase
+    let emailFinal = email; // Começa assumindo que o usuário digitou um e-mail
+
+    // Se o que foi digitado NÃO tem "@", tratamos como WhatsApp
+    if (!email.includes("@")) {
+      const whatsappLimpo = email.replace(/\D/g, "");
+
+      // Busca o e-mail atrelado a esse WhatsApp na tabela perfis
+      const { data: perfilEncontrado, error: erroBusca } = await supabase
+        .from('perfis')
+        .select('email')
+        .eq('whatsapp', whatsappLimpo)
+        .single();
+
+      if (erroBusca || !perfilEncontrado?.email) {
+        setErro("Nenhum usuário encontrado com este WhatsApp.");
+        setCarregando(false);
+        return;
+      }
+
+      emailFinal = perfilEncontrado.email;
+    }
+
+    // Agora faz o login oficial usando o e-mail descoberto
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: emailFinal,
       password: senha,
     });
 
     if (authError) {
-      setErro("E-mail ou senha incorretos. Tente novamente.");
+      setErro("Credenciais incorretas. Verifique seus dados.");
       setCarregando(false);
       return;
     }
 
-    // 2. Se a senha bater, vamos descobrir qual é o cargo dele (tipo)
+    // Redirecionamento (sua lógica original)
     if (authData.user) {
       const { data: perfil } = await supabase
         .from('perfis')
@@ -39,11 +61,10 @@ export default function LoginPage() {
         .eq('id', authData.user.id)
         .single();
 
-      // 3. A mágica do redirecionamento inteligente
       if (perfil?.tipo === 'admin' || perfil?.tipo === 'professor') {
-        router.push("/admin"); // Joga pro painel de controle
+        router.push("/admin");
       } else {
-        router.push("/"); // Se for aluno, vai pra tela inicial
+        router.push("/agenda");
       }
     }
   };
@@ -82,15 +103,17 @@ export default function LoginPage() {
           )}
 
           <div>
-            <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Seu E-mail</label>
+            <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">
+              E-mail ou Número de WhatsApp
+            </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
-                <Mail className="w-5 h-5" />
+                {email.includes("@") ? <Mail className="w-5 h-5" /> : <Phone className="w-5 h-5" />}
               </div>
               <input 
-                type="email" 
+                type="text" 
                 required 
-                placeholder="exemplo@email.com" 
+                placeholder="seu@email.com ou 37999999999" 
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-11 pr-4 text-white outline-none focus:border-orange-500 transition-colors"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}

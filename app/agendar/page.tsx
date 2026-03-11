@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Users, CheckCircle2, Loader2, X, ArrowRight } from "lucide-react";
+import { ChevronLeft, Users, CheckCircle2, Loader2, X, ArrowRight, Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 const diasSemana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
@@ -18,9 +18,8 @@ export default function AgendarPage() {
   const [salvando, setSalvando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   
-  const [dadosAluno, setDadosAluno] = useState({ nome: "", email: "", whatsapp: "" });
+  const [dadosAluno, setDadosAluno] = useState({ nome: "", email: "", whatsapp: "", senha: "" });
   const [erroAgendamento, setErroAgendamento] = useState("");
-
 
   useEffect(() => {
     async function buscarTurmas() {
@@ -35,7 +34,7 @@ export default function AgendarPage() {
   const abrirModal = (turma: any) => {
     setTurmaSelecionada(turma);
     setSucesso(false);
-    setErroAgendamento(""); // Limpa os erros antigos ao abrir o modal
+    setErroAgendamento("");
     setModalAberto(true);
   };
 
@@ -44,28 +43,41 @@ export default function AgendarPage() {
     setSalvando(true);
     setErroAgendamento("");
 
-    // 1. Tenta criar o usuário no Auth
+    // Limpa o WhatsApp para salvar apenas números no banco
+    const whatsappLimpo = dadosAluno.whatsapp.replace(/\D/g, "");
+
+    // 1. Verificar se o Telefone/WhatsApp já existe
+    const { data: telefoneExiste } = await supabase
+      .from('perfis')
+      .select('id')
+      .eq('whatsapp', whatsappLimpo)
+      .single();
+
+    if (telefoneExiste) {
+      setErroAgendamento("Este número de WhatsApp já está cadastrado em nosso sistema.");
+      setSalvando(false);
+      return;
+    }
+
+    // 2. Criar conta com a senha escolhida pelo usuário
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: dadosAluno.email,
-      password: `Arena${dadosAluno.whatsapp}`
+      password: dadosAluno.senha,
     });
 
-    // SE O E-MAIL JÁ EXISTIR, O SUPABASE GERA UM ERRO AQUI!
     if (authError) {
-      if (authError.message.includes('registered') || authError.status === 422) {
-        setErroAgendamento("Este e-mail já está cadastrado! Você já realizou uma aula experimental. Por favor, faça login no sistema.");
-      } else {
-        setErroAgendamento("Ocorreu um erro inesperado: " + authError.message);
-      }
+      setErroAgendamento(authError.message);
       setSalvando(false);
-      return; // Trava o código aqui, não deixa ir pro banco de dados
+      return;
     }
 
     if (authData.user) {
+      // 3. Insere o perfil e o e-mail (necessário para o login por telefone que conversamos)
       await supabase.from('perfis').insert([{
         id: authData.user.id,
         nome: dadosAluno.nome,
-        whatsapp: dadosAluno.whatsapp,
+        whatsapp: whatsappLimpo,
+        email: dadosAluno.email,
         tipo: 'aluno'
       }]);
 
@@ -112,17 +124,38 @@ export default function AgendarPage() {
                         {erroAgendamento}
                       </div>
                     )}
+                    
                     <div>
                       <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nome Completo</label>
                       <input type="text" required placeholder="Ex: Lucas Silva" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.nome} onChange={e => setDadosAluno({...dadosAluno, nome: e.target.value})} />
                     </div>
-                    <div>
-                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
-                      <input type="tel" required placeholder="(00) 00000-0000" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.whatsapp} onChange={e => setDadosAluno({...dadosAluno, whatsapp: e.target.value})} />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
+                        <input type="tel" required placeholder="(00) 00000-0000" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.whatsapp} onChange={e => setDadosAluno({...dadosAluno, whatsapp: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">E-mail</label>
+                        <input type="email" required placeholder="seu@email.com" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.email} onChange={e => setDadosAluno({...dadosAluno, email: e.target.value})} />
+                      </div>
                     </div>
+
+                    {/* NOVO CAMPO DE SENHA */}
                     <div>
-                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">E-mail</label>
-                      <input type="email" required placeholder="seu@email.com" className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" value={dadosAluno.email} onChange={e => setDadosAluno({...dadosAluno, email: e.target.value})} />
+                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block text-orange-400 flex items-center gap-2">
+                        <Lock className="w-3 h-3" /> Criar Senha de Acesso
+                      </label>
+                      <input 
+                        type="password" 
+                        required 
+                        minLength={6}
+                        placeholder="Mínimo 6 caracteres" 
+                        className="w-full bg-slate-950 border border-orange-500/30 rounded-xl p-3 text-white outline-none focus:border-orange-500 transition-all shadow-[0_0_15px_rgba(249,115,22,0.05)]" 
+                        value={dadosAluno.senha} 
+                        onChange={e => setDadosAluno({...dadosAluno, senha: e.target.value})} 
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1.5">Você usará este e-mail/WhatsApp e senha para ver sua agenda depois.</p>
                     </div>
 
                     <button type="submit" disabled={salvando} className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50 flex items-center justify-center gap-2">
@@ -136,15 +169,15 @@ export default function AgendarPage() {
                     <CheckCircle2 className="w-10 h-10" />
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-2">Vaga Confirmada!</h2>
-                  <p className="text-slate-400 mb-8">Te esperamos na areia, {dadosAluno.nome.split(" ")[0]}! O professor entrará em contato pelo WhatsApp.</p>
-                  <button onClick={() => setModalAberto(false)} className="w-full py-4 bg-slate-800 text-white font-bold text-sm rounded-xl hover:bg-slate-700 transition-colors">Voltar para horários</button>
+                  <p className="text-slate-400 mb-8">Te esperamos na areia, {dadosAluno.nome.split(" ")[0]}! Agora você já pode acessar sua agenda com sua senha.</p>
+                  <Link href="/entrar" className="block w-full py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors text-center">Fazer Login Agora</Link>
                 </div>
               )}
             </motion.div>
           </div>
         )}
       </AnimatePresence>
-
+      {/* Resto do código da página... */}
       <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-6 h-20 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ChevronLeft className="w-5 h-5" /><span className="font-medium text-sm">Voltar</span></Link>
