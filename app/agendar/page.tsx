@@ -13,13 +13,11 @@ export default function AgendarPage() {
   const [turmas, setTurmas] = useState<any[]>([]);
   const [carregando, setCarregando] = useState(true);
 
-  // Estados do Modal do Aluno
   const [modalAberto, setModalAberto] = useState(false);
   const [turmaSelecionada, setTurmaSelecionada] = useState<any>(null);
   const [salvando, setSalvando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   
-  // Dados rápidos do Aluno
   const [dadosAluno, setDadosAluno] = useState({ nome: "", email: "", whatsapp: "" });
 
   useEffect(() => {
@@ -42,14 +40,12 @@ export default function AgendarPage() {
     e.preventDefault();
     setSalvando(true);
 
-    // 1. Cria o usuário "silenciosamente" no Auth do Supabase
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: dadosAluno.email,
-      password: `Arena${dadosAluno.whatsapp}` // Senha temporária baseada no whats
+      password: `Arena${dadosAluno.whatsapp}`
     });
 
     if (authData.user) {
-      // 2. Salva o Perfil
       await supabase.from('perfis').insert([{
         id: authData.user.id,
         nome: dadosAluno.nome,
@@ -57,7 +53,6 @@ export default function AgendarPage() {
         tipo: 'aluno'
       }]);
 
-      // 3. Vincula o aluno à turma como 'experimental'
       await supabase.from('matriculas').insert([{
         perfil_id: authData.user.id,
         turma_id: turmaSelecionada.id,
@@ -79,13 +74,17 @@ export default function AgendarPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-20 relative">
       
-      {/* MODAL DE AGENDAMENTO RÁPIDO */}
       <AnimatePresence>
         {modalAberto && turmaSelecionada && (
-          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:p-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setModalAberto(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
             
-            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="bg-slate-900 border-t sm:border border-slate-800 p-8 rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl w-full max-w-md relative z-10">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              exit={{ scale: 0.95, opacity: 0, y: 20 }} 
+              className="bg-slate-900 border border-slate-800 p-8 rounded-[2rem] shadow-2xl w-full max-w-md relative z-10 max-h-[90vh] overflow-y-auto scrollbar-hide"
+            >
               <button onClick={() => setModalAberto(false)} className="absolute top-6 right-6 text-slate-500 hover:text-white bg-slate-800/50 p-2 rounded-full"><X className="w-5 h-5" /></button>
               
               {!sucesso ? (
@@ -127,7 +126,6 @@ export default function AgendarPage() {
         )}
       </AnimatePresence>
 
-      {/* HEADER NORMAL */}
       <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-6 h-20 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ChevronLeft className="w-5 h-5" /><span className="font-medium text-sm">Voltar</span></Link>
