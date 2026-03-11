@@ -24,3 +24,32 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+/* --- ESTILOS DA BARRA DE ROLAGEM (SCROLLBAR) --- */
+
+/* Esconde a barra onde usamos a classe scrollbar-hide (ex: nos dias da semana) */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE e Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Deixa a barra bonita e fina no resto do site e nos modais */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155; /* Cor slate-700 do Tailwind */
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #f97316; /* Fica Laranja quando passa o mouse! */
+}
