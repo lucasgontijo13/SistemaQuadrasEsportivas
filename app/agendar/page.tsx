@@ -7,11 +7,13 @@ import {
   ChevronLeft, Users, CheckCircle2, Loader2, 
   X, ArrowRight, Lock, Eye, EyeOff 
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import { useRouter } from "next/navigation";
+import { Turma, Perfil, Matricula } from "@/types";
+
+// IMPORTAMOS O NOSSO NOVO SERVIÇO AQUI!
+import { buscarTurmasComAlunos, buscarPerfilLogado, processarAgendamento } from "@/services/agendamentoService";
+
 const diasSemana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
-// Função de Máscara para WhatsApp
 const maskPhone = (value: string) => {
   return value
     .replace(/\D/g, "")
@@ -21,29 +23,23 @@ const maskPhone = (value: string) => {
 };
 
 export default function AgendarPage() {
-  const router = useRouter();
   const [diaSelecionado, setDiaSelecionado] = useState("Segunda");
-  const [turmas, setTurmas] = useState<any[]>([]);
+  const [turmas, setTurmas] = useState<Turma[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   const [modalAberto, setModalAberto] = useState(false);
-  const [turmaSelecionada, setTurmaSelecionada] = useState<any>(null);
+  const [turmaSelecionada, setTurmaSelecionada] = useState<Turma | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [sucesso, setSucesso] = useState(false);
   const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
-  const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
-  const [perfil, setPerfil] = useState<any>(null); // Agora o 'perfil' existirá!
   
-  // Estados para controle de visualização de senha
+  const [perfil, setPerfil] = useState<Perfil | null>(null);
+  
   const [verSenha, setVerSenha] = useState(false);
   const [verConfirmar, setVerConfirmar] = useState(false);
 
   const [dadosAluno, setDadosAluno] = useState({ 
-    nome: "", 
-    email: "", 
-    whatsapp: "", 
-    senha: "", 
-    confirmarSenha: "" 
+    nome: "", email: "", whatsapp: "", senha: "", confirmarSenha: "" 
   });
   const [erroAgendamento, setErroAgendamento] = useState("");
 
@@ -51,44 +47,19 @@ export default function AgendarPage() {
     async function carregarDados() {
       setCarregando(true);
       
-      // 1. Busca as turmas
-      const { data: turmasData, error } = await supabase
-        .from('turmas')
-        .select(`
-          *,
-          matriculas (
-            status,
-            perfis (
-              nome
-            )
-          )
-        `);
-        
-      if (error) console.error("Erro ao buscar turmas:", error);
-      if (turmasData) setTurmas(turmasData);
-      if (turmasData) setTurmas(turmasData);
+      // Código limpo: chama as funções do serviço em vez de fazer a lógica crua aqui
+      const turmasData = await buscarTurmasComAlunos();
+      setTurmas(turmasData);
 
-      // 2. Busca o usuário logado (Lógica similar à da sua Navbar)
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        setUsuarioLogado(session.user);
-
-        const { data: perfilData } = await supabase
-          .from('perfis')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        
-        if (perfilData) setPerfil(perfilData);
-      }
+      const { perfil } = await buscarPerfilLogado();
+      setPerfil(perfil);
 
       setCarregando(false);
     }
     carregarDados();
   }, []);
 
-  const abrirModal = (turma: any) => {
+  const abrirModal = (turma: Turma) => {
     setTurmaSelecionada(turma);
     setSucesso(false);
     setErroAgendamento("");
@@ -100,52 +71,15 @@ export default function AgendarPage() {
     setSalvando(true);
     setErroAgendamento("");
 
-    const whatsappLimpo = dadosAluno.whatsapp.replace(/\D/g, "");
+    // O serviço agora cuida de verificar senhas, buscar no banco e inserir.
+    const resultado = await processarAgendamento(dadosAluno, turmaSelecionada.id);
 
-    // 1. Verificar se o Telefone/WhatsApp já existe
-    const { data: telefoneExiste } = await supabase
-      .from('perfis')
-      .select('id')
-      .eq('whatsapp', whatsappLimpo)
-      .single();
-
-    if (telefoneExiste) {
-      setErroAgendamento("Este número de WhatsApp já está cadastrado em nosso sistema.");
-      setSalvando(false);
-      return;
-    }
-
-    // 2. Criar conta no Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: dadosAluno.email,
-      password: dadosAluno.senha,
-    });
-
-    if (authError) {
-      setErroAgendamento(authError.message);
-      setSalvando(false);
-      return;
-    }
-
-    if (authData.user) {
-      // 3. Insere o perfil e a matrícula
-      await supabase.from('perfis').insert([{
-        id: authData.user.id,
-        nome: dadosAluno.nome,
-        whatsapp: whatsappLimpo,
-        email: dadosAluno.email,
-        tipo: 'aluno'
-      }]);
-
-      await supabase.from('matriculas').insert([{
-        perfil_id: authData.user.id,
-        turma_id: turmaSelecionada.id,
-        status: 'experimental'
-      }]);
-
+    if (!resultado.sucesso) {
+      setErroAgendamento(resultado.erro || "Ocorreu um erro ao agendar.");
+    } else {
       setSucesso(true); 
-    
     }
+    
     setSalvando(false);
   };
 
@@ -188,12 +122,9 @@ export default function AgendarPage() {
                       <div>
                         <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
                         <input 
-                          type="tel" 
-                          required 
-                          placeholder="(00) 00000-0000" 
+                          type="tel" required placeholder="(00) 00000-0000" 
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none focus:border-orange-500" 
-                          value={dadosAluno.whatsapp} 
-                          onChange={e => setDadosAluno({...dadosAluno, whatsapp: maskPhone(e.target.value)})} 
+                          value={dadosAluno.whatsapp} onChange={e => setDadosAluno({...dadosAluno, whatsapp: maskPhone(e.target.value)})} 
                         />
                       </div>
                       <div>
@@ -202,7 +133,6 @@ export default function AgendarPage() {
                       </div>
                     </div>
 
-                    {/* CAMPOS DE SENHA */}
                     <div className="space-y-4">
                       <div className="relative">
                         <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block text-orange-400 flex items-center gap-2">
@@ -210,19 +140,11 @@ export default function AgendarPage() {
                         </label>
                         <div className="relative">
                           <input 
-                            type={verSenha ? "text" : "password"} 
-                            required 
-                            minLength={6}
-                            placeholder="Mínimo 6 caracteres" 
+                            type={verSenha ? "text" : "password"} required minLength={6} placeholder="Mínimo 6 caracteres" 
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pr-10 text-white outline-none focus:border-orange-500 transition-all" 
-                            value={dadosAluno.senha} 
-                            onChange={e => setDadosAluno({...dadosAluno, senha: e.target.value})} 
+                            value={dadosAluno.senha} onChange={e => setDadosAluno({...dadosAluno, senha: e.target.value})} 
                           />
-                          <button 
-                            type="button" 
-                            onClick={() => setVerSenha(!verSenha)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
-                          >
+                          <button type="button" onClick={() => setVerSenha(!verSenha)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors">
                             {verSenha ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
@@ -232,18 +154,11 @@ export default function AgendarPage() {
                         <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Confirmar Senha</label>
                         <div className="relative">
                           <input 
-                            type={verConfirmar ? "text" : "password"} 
-                            required 
-                            placeholder="Repita sua senha" 
+                            type={verConfirmar ? "text" : "password"} required placeholder="Repita sua senha" 
                             className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 pr-10 text-white outline-none focus:border-orange-500 transition-all" 
-                            value={dadosAluno.confirmarSenha} 
-                            onChange={e => setDadosAluno({...dadosAluno, confirmarSenha: e.target.value})} 
+                            value={dadosAluno.confirmarSenha} onChange={e => setDadosAluno({...dadosAluno, confirmarSenha: e.target.value})} 
                           />
-                          <button 
-                            type="button" 
-                            onClick={() => setVerConfirmar(!verConfirmar)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors"
-                          >
+                          <button type="button" onClick={() => setVerConfirmar(!verConfirmar)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors">
                             {verConfirmar ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
@@ -265,11 +180,7 @@ export default function AgendarPage() {
                     Te esperamos na areia! Agora sua vaga está garantida e sua conta está pronta.
                   </p>
                   
-                  {/* Botão de redirecionamento manual */}
-                  <Link 
-                    href="/agenda" 
-                    className="block w-full py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors text-center"
-                  >
+                  <Link href="/agenda" className="block w-full py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors text-center">
                     Concluir
                   </Link>
                 </div>
@@ -279,7 +190,6 @@ export default function AgendarPage() {
         )}
       </AnimatePresence>
 
-      {/* Cabeçalho e Listagem de Horários permanecem iguais ao seu código original */}
       <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-6 h-20 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"><ChevronLeft className="w-5 h-5" /><span className="font-medium text-sm">Voltar</span></Link>
@@ -294,7 +204,6 @@ export default function AgendarPage() {
           <p className="text-slate-400">Escolha o seu dia fixo na semana e garanta sua vaga na turma.</p>
         </motion.div>
 
-        {/* ... Restante da sua Main (Filtros e Cards) ... */}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="mb-10">
           <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide -mx-6 px-6 sm:mx-0 sm:px-0">
             {diasSemana.map((dia) => (
@@ -312,7 +221,6 @@ export default function AgendarPage() {
             {turmasDoDia.map((turma) => (
               <motion.div key={turma.id} variants={item} className="p-5 rounded-2xl border bg-slate-900/80 border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 
-                {/* Informações da Turma e Lista de Alunos */}
                 <div className="flex items-start gap-5">
                   <div className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-bold bg-slate-800 text-white mt-1">
                     {turma.horario.substring(0, 5)}
@@ -325,12 +233,10 @@ export default function AgendarPage() {
                       </div>
                     </div>
 
-                    {/* --- NOVA SEÇÃO: AVATARES DOS ALUNOS --- */}
                     <div className="flex items-center gap-3">
                       <div className="flex -space-x-2 overflow-hidden">
                         {turma.matriculas && turma.matriculas.length > 0 ? (
-                          turma.matriculas.map((matricula: any, idx: number) => {
-                            // Pega o primeiro nome para não ficar gigante
+                          turma.matriculas.map((matricula: Matricula, idx: number) => {
                             const nomeCompleto = matricula.perfis?.nome || "Aluno";
                             const primeiroNome = nomeCompleto.split(" ")[0];
                             const inicial = primeiroNome.charAt(0).toUpperCase();
@@ -338,7 +244,7 @@ export default function AgendarPage() {
                             return (
                               <div 
                                 key={idx} 
-                                title={primeiroNome} // Mostra o nome ao passar o mouse
+                                title={primeiroNome}
                                 className="inline-block h-8 w-8 rounded-full ring-2 ring-slate-900 bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-300 cursor-help hover:bg-slate-700 transition-colors"
                               >
                                 {inicial}
@@ -360,21 +266,16 @@ export default function AgendarPage() {
                         </span>
                       )}
                     </div>
-                    {/* --------------------------------------- */}
 
                   </div>
                 </div>
-
-                {/* Botões Dinâmicos */}
                 <div className="flex flex-col items-end gap-1">
                   {perfil?.tipo === 'aluno' ? (
-                    // Se já for aluno
                     <>
                       <span className="text-orange-500 font-bold text-xs uppercase tracking-widest">Você já é Aluno</span>
                       <Link href="/agenda" className="text-[10px] text-slate-500 hover:text-white underline">Ver minha agenda</Link>
                     </>
                   ) : (
-                    // Se for visitante
                     <button 
                       onClick={() => abrirModal(turma)} 
                       className="w-full sm:w-auto px-8 py-3 rounded-full font-bold text-sm transition-all bg-white text-slate-950 hover:bg-slate-200 active:scale-95 shadow-lg"

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Mail, Phone, ArrowRight, Loader2, AlertCircle, CheckCircle2, ChevronLeft } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { solicitarLinkRecuperacao } from "@/services/authService";
 
 export default function RecuperarSenhaPage() {
   const [identificador, setIdentificador] = useState("");
@@ -12,42 +12,22 @@ export default function RecuperarSenhaPage() {
   const [erro, setErro] = useState("");
   const [sucesso, setSucesso] = useState(false);
 
-  const solicitarRecuperacao = async (e: React.FormEvent) => {
+  const handleRecuperacao = async (e: React.FormEvent) => {
     e.preventDefault();
     setCarregando(true);
     setErro("");
     setSucesso(false);
 
-    let emailFinal = identificador;
-
-    // Se não tiver "@", assumimos que é um WhatsApp
-    if (!identificador.includes("@")) {
-      const whatsappLimpo = identificador.replace(/\D/g, "");
-      const { data: perfilEncontrado, error: erroBusca } = await supabase
-        .from('perfis')
-        .select('email')
-        .eq('whatsapp', whatsappLimpo)
-        .single();
-
-      if (erroBusca || !perfilEncontrado?.email) {
-        setErro("Não encontramos nenhum usuário com este WhatsApp.");
-        setCarregando(false);
-        return;
-      }
-      emailFinal = perfilEncontrado.email;
-    }
-
-    // Dispara o e-mail de recuperação pelo Supabase
-    const { error } = await supabase.auth.resetPasswordForEmail(emailFinal, {
-      redirectTo: `${window.location.origin}/atualizar-senha`, // Para onde o link do e-mail vai mandar
-    });
-
-    if (error) {
-      setErro("Erro ao enviar o e-mail. Tente novamente mais tarde.");
-    } else {
+    try {
+      await solicitarLinkRecuperacao(identificador);
       setSucesso(true);
+    } catch (err) {
+      // Tratamento seguro de erro para evitar 'any'
+      const mensagem = err instanceof Error ? err.message : "Erro ao processar sua solicitação.";
+      setErro(mensagem);
+    } finally {
+      setCarregando(false);
     }
-    setCarregando(false);
   };
 
   return (
@@ -75,15 +55,15 @@ export default function RecuperarSenhaPage() {
               </div>
               <h3 className="text-xl font-bold text-white mb-2">E-mail enviado!</h3>
               <p className="text-slate-400 text-sm leading-relaxed mb-6">
-                Enviamos um link de recuperação para o seu e-mail. Verifique sua caixa de entrada (e a pasta de spam).
+                Enviamos um link de recuperação para o seu e-mail cadastrado. Verifique sua caixa de entrada.
               </p>
               <Link href="/entrar" className="block w-full py-4 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-700 transition-colors">
                 Voltar para o Login
               </Link>
             </motion.div>
           ) : (
-            <form onSubmit={solicitarRecuperacao} className="space-y-5">
-              <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+            <form onSubmit={handleRecuperacao} className="space-y-5">
+              <p className="text-slate-400 text-sm mb-6 leading-relaxed text-center sm:text-left">
                 Digite seu e-mail ou WhatsApp cadastrado. Enviaremos um link seguro para você redefinir sua senha.
               </p>
 
@@ -95,7 +75,7 @@ export default function RecuperarSenhaPage() {
               )}
 
               <div>
-                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">E-mail ou WhatsApp</label>
+                <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Identificação</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
                     {identificador.includes("@") ? <Mail className="w-5 h-5" /> : <Phone className="w-5 h-5" />}
@@ -116,7 +96,11 @@ export default function RecuperarSenhaPage() {
                 disabled={carregando} 
                 className="w-full mt-2 py-4 bg-orange-500 text-slate-950 font-bold rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {carregando ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Enviar Link <ArrowRight className="w-5 h-5" /></>}
+                {carregando ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>Enviar Link <ArrowRight className="w-5 h-5" /></>
+                )}
               </button>
             </form>
           )}

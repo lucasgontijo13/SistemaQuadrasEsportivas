@@ -4,51 +4,37 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ChevronLeft, CalendarDays, Loader2, Clock, MapPin, UserCheck } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { ChevronLeft, CalendarDays, Loader2, Clock, UserCheck } from "lucide-react";
+
+// Importamos os tipos e o novo serviço
+import { Matricula } from "@/types";
+import { buscarMinhaAgenda } from "@/services/agendaService";
 
 export default function AgendaPage() {
   const router = useRouter();
   const [carregando, setCarregando] = useState(true);
-  const [minhasAulas, setMinhasAulas] = useState<any[]>([]);
+  const [minhasAulas, setMinhasAulas] = useState<Matricula[]>([]);
 
   useEffect(() => {
-    async function carregarAgenda() {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) {
+    async function carregarDados() {
+      try {
+        const aulas = await buscarMinhaAgenda();
+        setMinhasAulas(aulas);
+      } catch { 
         router.push("/entrar");
-        return;
+      } finally {
+        setCarregando(false);
       }
-
-      // Busca as matrículas do aluno logado e traz os dados da turma junto
-      const { data, error } = await supabase
-        .from('matriculas')
-        .select(`
-          id, 
-          status, 
-          turmas (
-            dia_semana, 
-            horario, 
-            nivel, 
-            professor,
-            matriculas (
-              perfis (
-                nome
-              )
-            )
-          )
-        `)
-        .eq('perfil_id', session.user.id);
-
-      if (data) setMinhasAulas(data);
-      setCarregando(false);
     }
-    carregarAgenda();
+    carregarDados();
   }, [router]);
 
   if (carregando) {
-    return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+      </div>
+    );
   }
 
   return (
@@ -90,27 +76,24 @@ export default function AgendaPage() {
                 transition={{ delay: index * 0.1 }}
                 className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 sm:p-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 relative overflow-hidden"
               >
-                {/* Faixa lateral indicando status */}
                 <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${aula.status === 'experimental' ? 'bg-orange-500' : 'bg-emerald-500'}`}></div>
 
-                {/* Conteúdo da Esquerda: Dados da Turma e Colegas */}
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
                     <span className={`text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${aula.status === 'experimental' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                       {aula.status === 'experimental' ? 'Aula Experimental' : 'Aluno Fixo'}
                     </span>
                   </div>
-                  <h3 className="text-2xl font-bold text-white mb-1">{aula.turmas.nivel}</h3>
+                  <h3 className="text-2xl font-bold text-white mb-1">{aula.turmas?.nivel}</h3>
                   <p className="text-slate-400 flex items-center gap-2 mb-4">
-                    <UserCheck className="w-4 h-4" /> Professor {aula.turmas.professor}
+                    <UserCheck className="w-4 h-4" /> Professor {aula.turmas?.professor}
                   </p>
 
-                  {/* --- NOVA SEÇÃO: COLEGAS DE TURMA --- */}
                   <div className="pt-4 border-t border-slate-800/50">
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Na areia com você</p>
                     <div className="flex gap-1.5 flex-wrap">
-                      {aula.turmas.matriculas && aula.turmas.matriculas.length > 0 ? (
-                        aula.turmas.matriculas.map((mat: any, idx: number) => {
+                      {aula.turmas?.matriculas && (aula.turmas.matriculas.length > 0) ? (
+                        aula.turmas.matriculas.map((mat, idx) => {
                           const nomeCompleto = mat.perfis?.nome || "Aluno";
                           const primeiroNome = nomeCompleto.split(" ")[0];
                           const inicial = primeiroNome.charAt(0).toUpperCase();
@@ -130,16 +113,14 @@ export default function AgendaPage() {
                       )}
                     </div>
                   </div>
-                  {/* --------------------------------------- */}
                 </div>
 
-                {/* Conteúdo da Direita: Horário */}
                 <div className="flex flex-row sm:flex-col gap-4 sm:gap-2 text-sm font-medium bg-slate-950 p-4 rounded-2xl border border-slate-800 sm:min-w-[140px] shrink-0 mt-4 sm:mt-0">
                   <div className="flex items-center gap-2 text-slate-300">
-                    <CalendarDays className="w-4 h-4 text-orange-500" /> {aula.turmas.dia_semana}
+                    <CalendarDays className="w-4 h-4 text-orange-500" /> {aula.turmas?.dia_semana}
                   </div>
                   <div className="flex items-center gap-2 text-slate-300">
-                    <Clock className="w-4 h-4 text-orange-500" /> {aula.turmas.horario.substring(0, 5)}
+                    <Clock className="w-4 h-4 text-orange-500" /> {aula.turmas?.horario?.substring(0, 5)}
                   </div>
                 </div>
               </motion.div>

@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Lock, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+
+// Importamos o novo serviço
+import { atualizarSenhaUsuario } from "@/services/authService";
 
 export default function AtualizarSenhaPage() {
-  const router = useRouter();
   const [senha, setSenha] = useState("");
   const [confirmarSenha, setConfirmarSenha] = useState("");
   const [verSenha, setVerSenha] = useState(false);
@@ -18,14 +18,21 @@ export default function AtualizarSenhaPage() {
   const [sucesso, setSucesso] = useState(false);
 
   useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes("error_description")) {
-      const params = new URLSearchParams(hash.replace("#", "?"));
-      const mensagemErro = params.get("error_description")?.replace(/\+/g, " ");
-      if (mensagemErro?.includes("expired")) {
-        setErro("O link de recuperação expirou ou já foi usado. Por favor, solicite um novo link.");
-      } else {
-        setErro(mensagemErro || "Erro ao validar o link de recuperação.");
+    // Verificamos se estamos no navegador (evita erros de SSR)
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash;
+      
+      if (hash.includes("error_description")) {
+        const params = new URLSearchParams(hash.replace("#", "?"));
+        const mensagemErro = params.get("error_description")?.replace(/\+/g, " ");
+
+        queueMicrotask(() => {
+          if (mensagemErro?.includes("expired")) {
+            setErro("O link de recuperação expirou ou já foi usado. Por favor, solicite um novo link.");
+          } else {
+            setErro(mensagemErro || "Erro ao validar o link de recuperação.");
+          }
+        });
       }
     }
   }, []);
@@ -34,6 +41,7 @@ export default function AtualizarSenhaPage() {
     e.preventDefault();
     setErro("");
 
+    // Validações básicas de UI
     if (senha !== confirmarSenha) {
       setErro("As senhas não coincidem. Verifique e tente novamente.");
       return;
@@ -46,18 +54,12 @@ export default function AtualizarSenhaPage() {
 
     setCarregando(true);
 
-    const { error } = await supabase.auth.updateUser({
-      password: senha
-    });
+    // Chamada ao serviço isolado
+    const resultado = await atualizarSenhaUsuario(senha);
 
-    if (error) {
-      if (error.message.toLowerCase().includes("different") || error.message.toLowerCase().includes("same")) {
-        setErro("A nova senha precisa ser diferente da sua senha atual.");
-      } else {
-        setErro("Não foi possível atualizar a senha. O link pode ter expirado.");
-      }
+    if (!resultado.sucesso) {
+      setErro(resultado.erro || "Erro ao atualizar senha.");
     } else {
-      await supabase.auth.signOut();
       setSucesso(true);
     }
     
@@ -86,7 +88,6 @@ export default function AtualizarSenhaPage() {
                 Sua nova senha foi salva com sucesso. Por favor, faça login novamente para acessar sua conta.
               </p>
               
-              {/* Agora o botão aponta para a tela de Login */}
               <Link href="/entrar" className="block w-full py-4 bg-orange-500 text-slate-950 font-bold rounded-xl hover:bg-orange-600 transition-colors text-center">
                 Ir para o Login
               </Link>
@@ -111,6 +112,7 @@ export default function AtualizarSenhaPage() {
               {!erro.includes("expirou") && (
                 <>
                   <div className="space-y-4">
+                    {/* Input Nova Senha */}
                     <div className="relative">
                       <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nova Senha</label>
                       <div className="relative">
@@ -131,13 +133,13 @@ export default function AtualizarSenhaPage() {
                       </div>
                     </div>
 
+                    {/* Input Confirmar Senha */}
                     <div className="relative">
                       <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Confirmar Nova Senha</label>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500">
                           <Lock className="w-5 h-5" />
                         </div>
-                        {/* AQUI USA O NOVO ESTADO 'verConfirmar' */}
                         <input 
                           type={verConfirmar ? "text" : "password"} 
                           required 
@@ -146,7 +148,6 @@ export default function AtualizarSenhaPage() {
                           value={confirmarSenha}
                           onChange={(e) => setConfirmarSenha(e.target.value)}
                         />
-                        {/* NOVO BOTÃO DE OLHINHO ADICIONADO AQUI */}
                         <button type="button" onClick={() => setVerConfirmar(!verConfirmar)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors">
                           {verConfirmar ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>

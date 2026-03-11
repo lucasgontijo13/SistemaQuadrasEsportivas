@@ -4,25 +4,34 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Users, Activity, ChevronLeft, CheckCircle2, AlertCircle, 
+  Users, ChevronLeft, CheckCircle2, 
   Loader2, CalendarDays, Plus, Trash2, X, Clock, MapPin, Edit2, UserCheck 
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+
+import { Turma, HorarioQuadra, Matricula } from "@/types";
+import { 
+  verificarPermissaoAdmin, 
+  buscarDadosPainel, 
+  excluirRegistro, 
+  salvarTurma, 
+  salvarQuadra, 
+  efetivarMatricula 
+} from "@/services/adminService";
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel">("alunos");
   
-  const [matriculas, setMatriculas] = useState<any[]>([]);
-  const [turmas, setTurmas] = useState<any[]>([]);
-  const [horariosQuadra, setHorariosQuadra] = useState<any[]>([]);
+  const [matriculas, setMatriculas] = useState<Matricula[]>([]);
+  const [turmas, setTurmas] = useState<Turma[]>([]);
+  const [horariosQuadra, setHorariosQuadra] = useState<HorarioQuadra[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   const [modalAberto, setModalAberto] = useState(false);
   const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno">("turma");
   const [idEdicao, setIdEdicao] = useState<number | null>(null);
-  const [alunoSelecionado, setAlunoSelecionado] = useState<any>(null);
+  const [alunoSelecionado, setAlunoSelecionado] = useState<Matricula | null>(null);
   const [novaTurma, setNovaTurma] = useState({ dia_semana: "Segunda", horario: "18:00", nivel: "Iniciante", professor: "João Paulo", vagas_totais: 6 });
   const [novoHorarioQuadra, setNovoHorarioQuadra] = useState({ dia_semana: "Sábado", horario_inicio: "08:00", horario_fim: "09:00", preco: "R$ 80,00" });
   
@@ -33,79 +42,50 @@ export default function AdminDashboard() {
   const [diaFiltroModal, setDiaFiltroModal] = useState("Segunda");
   const diasDaSemanaModal = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
 
-  const abrirDetalhesAluno = (matricula: any) => {
+  const abrirDetalhesAluno = (matricula: Matricula) => {
     setAlunoSelecionado(matricula);
     setTipoModal("ver_aluno");
     setModalAberto(true);
   };
 
   const buscarDados = async () => {
-    setCarregando(true);
-    // MUDANÇA: Buscando CPF, data e contato para saber se o cadastro está completo
-    const { data: dadosMatriculas } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis(id, nome, nivel, cpf, data_nascimento, contato_emergencia), turmas(id, dia_semana, horario)`).order('created_at', { ascending: false });
-    if (dadosMatriculas) setMatriculas(dadosMatriculas);
-
-    const { data: dadosTurmas } = await supabase
-      .from('turmas')
-      .select(`
-        *,
-        matriculas (
-          id,
-          status,
-          perfis (
-            id, nome, nivel, whatsapp, cpf, data_nascimento, contato_emergencia
-          )
-        )
-      `)
-      .order('id', { ascending: true });
-    if (dadosTurmas) setTurmas(dadosTurmas);
-
-    const { data: dadosQuadra } = await supabase.from('horarios_quadra').select('*').order('id', { ascending: true });
-    if (dadosQuadra) setHorariosQuadra(dadosQuadra);
-    setCarregando(false);
+    try {
+      const dados = await buscarDadosPainel();
+      setTurmas(dados.turmas);
+      setHorariosQuadra(dados.horariosQuadra);
+      setMatriculas(dados.matriculas as Matricula[]); // Adicionamos esta linha!
+    } catch (error) {
+      console.error("Erro ao buscar dados do painel:", error);
+    }
   };
 
   useEffect(() => {
-    async function verificarAcessoEBuscarDados() {
-      const { data: authData } = await supabase.auth.getUser();
-      
-      if (!authData.user) {
+    async function verificarAcesso() {
+      const temPermissao = await verificarPermissaoAdmin();
+      if (!temPermissao) {
         router.push("/");
         return;
       }
-
-      const { data: perfil } = await supabase
-        .from('perfis')
-        .select('tipo')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (!perfil || (perfil.tipo !== 'admin' && perfil.tipo !== 'professor')) {
-        alert("Acesso negado. Área restrita para professores.");
-        router.push("/");
-        return;
-      }
-
       setAutorizado(true);
-      buscarDados();
+      await buscarDados();
+      setCarregando(false);
     }
-    
-    verificarAcessoEBuscarDados();
+    verificarAcesso();
   }, [router]);
 
-  const abrirModalEfetivar = (mat: any) => {
-    // Verifica se ele já tem os dados fiscais preenchidos
+  const abrirModalEfetivar = (mat: Matricula) => {
     const p = mat.perfis;
     const isCompleto = p?.cpf && p?.data_nascimento && p?.contato_emergencia;
 
     setDadosEfetivacao({
       matriculaId: mat.id,
-      perfilId: mat.perfil_id || p?.id,
+      perfilId: mat.perfil_id || p?.id || "",
       nomeAluno: p?.nome || "Aluno",
       nivel: p?.nivel || "Iniciante",
-      turmasIds: [mat.turma_id || mat.turmas?.id],
+      turmasIds: [mat.turma_id],
       cadastroCompleto: !!isCompleto
     });
+    
     setDiaFiltroModal(mat.turmas?.dia_semana || "Segunda"); 
     setTipoModal("efetivar_aluno");
     setModalAberto(true);
@@ -124,80 +104,39 @@ export default function AdminDashboard() {
   const salvarDados = async (e: React.FormEvent) => {
     e.preventDefault();
     setCarregando(true);
-    
-    if (tipoModal === "turma") {
-      await supabase.from('turmas').insert([novaTurma]);
-      buscarDados();
-    } 
-    else if (tipoModal === "editar_turma" && idEdicao) {
-      await supabase.from('turmas').update(novaTurma).eq('id', idEdicao);
-      buscarDados();
-    } 
-    else if (tipoModal === "quadra") {
-      await supabase.from('horarios_quadra').insert([novoHorarioQuadra]);
-      buscarDados();
-    }
-    else if (tipoModal === "efetivar_aluno") {
-      if (dadosEfetivacao.turmasIds.length === 0) {
-        alert("Selecione pelo menos uma turma!");
-        setCarregando(false);
-        return;
-      }
 
-      // 1. Atualiza o nível do aluno na tabela 'perfis'
-      const { error: erroPerfil } = await supabase
-        .from('perfis')
-        .update({ nivel: dadosEfetivacao.nivel })
-        .eq('id', dadosEfetivacao.perfilId);
-        
-      if (erroPerfil) {
-        alert("Erro ao atualizar o perfil: " + erroPerfil.message);
-        setCarregando(false);
-        return;
+    try {
+      if (tipoModal === "turma" || tipoModal === "editar_turma") {
+        await salvarTurma(novaTurma, idEdicao);
+      } 
+      else if (tipoModal === "quadra") {
+        await salvarQuadra(novoHorarioQuadra, idEdicao);
+      } 
+      else if (tipoModal === "efetivar_aluno" && alunoSelecionado) {
+        // alunoSelecionado aqui representa a matrícula
+        await efetivarMatricula(alunoSelecionado.id);
       }
       
-      // 2. MÁQUINA DE ESTADOS: Define o status com base no preenchimento do perfil
-      const statusDestino = dadosEfetivacao.cadastroCompleto ? 'aguardando_pagamento' : 'aguardando_dados';
-
-      // 3. ATUALIZA A MATRÍCULA EXISTENTE
-      // Usamos o matriculaId que já temos para mudar o status e a turma definitiva
-      const { error: erroUpdate } = await supabase
-        .from('matriculas')
-        .update({ 
-          status: statusDestino,
-          turma_id: dadosEfetivacao.turmasIds[0] // Assume a primeira turma selecionada como a principal
-        })
-        .eq('id', dadosEfetivacao.matriculaId);
-      
-      if (erroUpdate) {
-        console.error("ERRO AO ATUALIZAR MATRÍCULA:", erroUpdate);
-        alert(`Erro ao efetivar: ${erroUpdate.message}`);
-        setCarregando(false);
-        return;
-      }
-
-      // 4. Se o professor escolheu MAIS de uma turma para o mesmo aluno
-      // (Ex: Aluno vai treinar Terça e Quinta), criamos as extras:
-      if (dadosEfetivacao.turmasIds.length > 1) {
-        const turmasExtras = dadosEfetivacao.turmasIds.slice(1).map(tId => ({
-          perfil_id: dadosEfetivacao.perfilId,
-          turma_id: tId,
-          status: statusDestino
-        }));
-        
-        await supabase.from('matriculas').insert(turmasExtras);
-      }
-      
-      buscarDados();
       setModalAberto(false);
+      buscarDados(); // Atualiza a vista com os novos dados
+    } catch (error) {
+      alert("Ocorreu um erro ao guardar as informações.");
+      console.error(error);
     }
-    setModalAberto(false);
+
+    setCarregando(false);
   };
 
-  const excluirItem = async (id: number, tabela: "turmas" | "horarios_quadra" | "matriculas") => {
-    if(!window.confirm("Tem certeza que deseja excluir?")) return;
-    await supabase.from(tabela).delete().eq('id', id);
-    buscarDados();
+  const excluirItem = async (id: number, tabela: 'turmas' | 'horarios_quadra' | 'matriculas') => {
+    if (confirm("Tem a certeza que deseja excluir este registo?")) {
+      try {
+        await excluirRegistro(tabela, id);
+        buscarDados(); // Recarrega a lista
+      } catch (error) {
+        console.error(error); 
+        alert("Erro ao excluir.");
+      }
+    }
   };
 
   const abrirModal = (tipo: "turma" | "quadra") => {
@@ -207,7 +146,7 @@ export default function AdminDashboard() {
     setModalAberto(true);
   };
 
-  const abrirModalEdicao = (turmaExistente: any) => {
+  const abrirModalEdicao = (turmaExistente: Turma) => {
     setNovaTurma({ dia_semana: turmaExistente.dia_semana, horario: turmaExistente.horario, nivel: turmaExistente.nivel, professor: turmaExistente.professor, vagas_totais: turmaExistente.vagas_totais });
     setIdEdicao(turmaExistente.id);
     setTipoModal("editar_turma");
@@ -491,7 +430,7 @@ export default function AdminDashboard() {
                         <div className="flex flex-wrap items-center gap-3">
                           <div className="flex gap-1.5 flex-wrap">
                             {turma.matriculas && turma.matriculas.length > 0 ? (
-                              turma.matriculas.map((matricula: any, idx: number) => {
+                              turma.matriculas.map((matricula: Matricula, idx: number) => {
                                 const nomeCompleto = matricula.perfis?.nome || "Aluno";
                                 const primeiroNome = nomeCompleto.split(" ")[0];
                                 const inicial = primeiroNome.charAt(0).toUpperCase();
@@ -522,7 +461,7 @@ export default function AdminDashboard() {
                           
                           {/* Contador de Lotação */}
                           <span className="text-xs font-medium px-2 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-slate-400 flex items-center gap-1">
-                            <span className={turma.matriculas?.length >= turma.vagas_totais ? "text-orange-500 font-bold" : "text-emerald-400 font-bold"}>
+                            <span className={(turma.matriculas?.length || 0) >= turma.vagas_totais ? "text-orange-500 font-bold" : "text-emerald-400 font-bold"}>
                               {turma.matriculas?.length || 0}
                             </span> 
                             / {turma.vagas_totais} vagas
