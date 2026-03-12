@@ -50,6 +50,8 @@ export function Navbar() {
 
         if (matriculas && matriculas.length > 0) {
           setTemPendencia(true);
+        } else {
+          setTemPendencia(false); // NOVO: Garante que a pendência some se não houver mais matrículas travadas
         }
       } else {
         // Se não houver sessão, limpa os dados
@@ -65,14 +67,23 @@ export function Navbar() {
       atualizarEstado(session);
     });
 
-    // 2. O SEGREDO: "Escuta" ativamente logins e logouts em tempo real!
+    // 2. "Escuta" ativamente logins e logouts em tempo real
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       atualizarEstado(session);
     });
 
-    // Limpeza do listener quando o componente é desmontado
+
+    const recarregarNavbar = () => {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        atualizarEstado(session);
+      });
+    };
+    window.addEventListener("perfilAtualizado", recarregarNavbar);
+
+    // Limpeza dos listeners quando o componente é desmontado
     return () => {
       subscription.unsubscribe();
+      window.removeEventListener("perfilAtualizado", recarregarNavbar); // NOVO
     };
   }, []);
 

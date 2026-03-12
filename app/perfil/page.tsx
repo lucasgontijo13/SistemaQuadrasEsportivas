@@ -19,6 +19,8 @@ export default function PerfilPage() {
   const [salvando, setSalvando] = useState(false);
   const [mensagem, setMensagem] = useState({ tipo: "", texto: "" });
   const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const [pendenciaBanco, setPendenciaBanco] = useState(false);
+
 
   useEffect(() => {
     async function carregar() {
@@ -27,7 +29,7 @@ export default function PerfilPage() {
         if (!dados) {
           router.push("/entrar");
         } else {
-          // Aplica as máscaras nos dados que vêm do banco
+          setPendenciaBanco(!dados.cpf || !dados.data_nascimento || !dados.contato_emergencia);
           setPerfil({
             ...dados,
             whatsapp: maskPhone(dados.whatsapp || ""),
@@ -53,7 +55,14 @@ export default function PerfilPage() {
 
     try {
       await atualizarPerfilUsuario(perfil);
+      
+    
+      // Ela envia um sinal invisível avisando que o perfil mudou
+      window.dispatchEvent(new Event("perfilAtualizado"));
+      
       setMensagem({ tipo: "sucesso", texto: "Perfil atualizado com sucesso!" });
+      setPendenciaBanco(!perfil.cpf || !perfil.data_nascimento || !perfil.contato_emergencia);
+      setTimeout(() => setMensagem({ tipo: "", texto: "" }), 3000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao salvar perfil.";
       setMensagem({ tipo: "erro", texto: msg });
@@ -66,7 +75,7 @@ export default function PerfilPage() {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
   }
 
-  const cadastroPendente = !perfil.cpf || !perfil.data_nascimento || !perfil.contato_emergencia;
+  
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-20">
@@ -89,7 +98,7 @@ export default function PerfilPage() {
           <p className="text-slate-400 mt-2">Gerencie suas informações pessoais e dados de matrícula.</p>
         </motion.div>
 
-        {cadastroPendente && (
+        {pendenciaBanco && (
           <div className="mb-8 p-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl flex gap-4 items-start">
             <AlertTriangle className="w-6 h-6 text-orange-500 flex-shrink-0 mt-0.5" />
             <div>
