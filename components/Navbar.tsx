@@ -26,42 +26,54 @@ export function Navbar() {
   const [notificacaoAberta, setNotificacaoAberta] = useState(false);
 
   useEffect(() => {
-    async function carregarDadosIniciais() {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
+    // Transformamos a busca de dados numa função que recebe a sessão atual
+    async function atualizarEstado(session: any) {
+      if (session) {
+        setUsuarioLogado(session.user);
+
+        // Busca o Perfil
+        const { data: perfilData } = await supabase
+          .from('perfis')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
         
-        if (session) {
-          setUsuarioLogado(session.user);
+        if (perfilData) setPerfil(perfilData);
 
-          // Busca o Perfil
-          const { data: perfilData } = await supabase
-            .from('perfis')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-          
-          if (perfilData) setPerfil(perfilData);
+        // Busca Pendências de Dados
+        const { data: matriculas } = await supabase
+          .from('matriculas')
+          .select('status')
+          .eq('perfil_id', session.user.id)
+          .eq('status', 'aguardando_dados')
+          .limit(1);
 
-          // Busca Pendências de Dados
-          const { data: matriculas } = await supabase
-            .from('matriculas')
-            .select('status')
-            .eq('perfil_id', session.user.id)
-            .eq('status', 'aguardando_dados')
-            .limit(1);
-
-          if (matriculas && matriculas.length > 0) {
-            setTemPendencia(true);
-          }
+        if (matriculas && matriculas.length > 0) {
+          setTemPendencia(true);
         }
-      } catch (error) {
-        console.error("Erro ao carregar dados da navbar:", error);
-      } finally {
-        setCarregando(false);
+      } else {
+        // Se não houver sessão, limpa os dados
+        setUsuarioLogado(null);
+        setPerfil(null);
+        setTemPendencia(false);
       }
+      setCarregando(false);
     }
 
-    carregarDadosIniciais();
+    // 1. Executa a busca inicial (quando o utilizador dá F5)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      atualizarEstado(session);
+    });
+
+    // 2. O SEGREDO: "Escuta" ativamente logins e logouts em tempo real!
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      atualizarEstado(session);
+    });
+
+    // Limpeza do listener quando o componente é desmontado
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const fazerLogout = async () => {

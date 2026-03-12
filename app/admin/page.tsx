@@ -4,25 +4,31 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Users, ChevronLeft, CheckCircle2, 
-  Loader2, CalendarDays, Plus, Trash2, X, Clock, MapPin, Edit2, UserCheck 
+  Users, ChevronLeft, CheckCircle2, Loader2, CalendarDays, Plus, 
+  Trash2, X, Clock, MapPin, Edit2, UserCheck, Shield, UserPlus, AlertCircle 
 } from "lucide-react";
 
-import { Turma, HorarioQuadra, Matricula } from "@/types";
+import { Turma, HorarioQuadra, Matricula, Perfil } from "@/types";
 import { 
-  verificarPermissaoAdmin, 
-  buscarDadosPainel, 
-  excluirRegistro, 
-  salvarTurma, 
-  salvarQuadra, 
-  efetivarMatricula ,
-  atualizarPerfil
+  verificarPermissaoAdmin, buscarDadosPainel, excluirRegistro, salvarTurma, 
+  salvarQuadra, efetivarMatricula, atualizarPerfil,
+  cadastrarNovoProfessor, excluirProfessor 
 } from "@/services/adminService";
+
+const maskPhone = (value: string) => {
+  if (!value) return "";
+  
+  return value
+    .replace(/\D/g, "") // Tira tudo que não é número
+    .replace(/(\d{2})(\d)/, "($1) $2") // Coloca o parênteses DDD
+    .replace(/(\d{5})(\d)/, "$1-$2") // Coloca o hífen depois do 5º dígito
+    .replace(/(-\d{4})\d+?$/, "$1"); // Impede de digitar mais que 15 caracteres
+};
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
-  const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel">("alunos");
+  const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel" | "professores">("alunos");
   
   const [matriculas, setMatriculas] = useState<Matricula[]>([]);
   const [turmas, setTurmas] = useState<Turma[]>([]);
@@ -30,9 +36,15 @@ export default function AdminDashboard() {
   const [carregando, setCarregando] = useState(true);
 
   const [modalAberto, setModalAberto] = useState(false);
-  // 1. No topo, adicione "editar_aluno" ao tipoModal
-  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno">("turma");
+  const [tipoLogado, setTipoLogado] = useState<string>(""); // Para saber se é admin ou professor
+  const [professores, setProfessores] = useState<Perfil[]>([]); // Lista de professores
+  
 
+  // Adicione 'professor' no tipoModal
+  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno" | "professor">("turma");
+  const [novoProfessor, setNovoProfessor] = useState({ nome: "", email: "", whatsapp: "", senha: "" });
+
+  const [erroModal, setErroModal] = useState("");
   // 2. Adicione este estado para controlar o nível no formulário
   const [nivelEdicao, setNivelEdicao] = useState("");
   
@@ -41,6 +53,8 @@ export default function AdminDashboard() {
   const [novaTurma, setNovaTurma] = useState({ dia_semana: "Segunda", horario: "18:00", nivel: "Iniciante", professor: "João Paulo", vagas_totais: 6 });
   const [novoHorarioQuadra, setNovoHorarioQuadra] = useState({ dia_semana: "Sábado", horario_inicio: "08:00", horario_fim: "09:00", preco: "R$ 80,00" });
   
+  
+
   const [dadosEfetivacao, setDadosEfetivacao] = useState<{ matriculaId: number, perfilId: string, nomeAluno: string, nivel: string, turmasIds: number[], cadastroCompleto: boolean }>({ 
     matriculaId: 0, perfilId: "", nomeAluno: "", nivel: "Iniciante", turmasIds: [], cadastroCompleto: false 
   });
@@ -59,10 +73,9 @@ export default function AdminDashboard() {
       const dados = await buscarDadosPainel();
       setTurmas(dados.turmas);
       setHorariosQuadra(dados.horariosQuadra);
-      setMatriculas(dados.matriculas as Matricula[]); // Adicionamos esta linha!
-    } catch (error) {
-      console.error("Erro ao buscar dados do painel:", error);
-    }
+      setMatriculas(dados.matriculas as Matricula[]);
+      setProfessores(dados.professores); // Salva a lista de professores
+    } catch (error) { console.error("Erro ao buscar:", error); }
   };
 
   const abrirEdicaoNivel = (matricula: Matricula) => {
@@ -74,17 +87,20 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     async function verificarAcesso() {
-      const temPermissao = await verificarPermissaoAdmin();
-      if (!temPermissao) {
+      const { autorizado, tipo } = await verificarPermissaoAdmin(); // Desestrutura o retorno
+      if (!autorizado) {
         router.push("/");
         return;
       }
+      setTipoLogado(tipo); // Salva o tipo (admin/professor) no estado
       setAutorizado(true);
       await buscarDados();
       setCarregando(false);
     }
     verificarAcesso();
   }, [router]);
+
+  
 
   const abrirModalEfetivar = (mat: Matricula) => {
     const p = mat.perfis;
@@ -117,31 +133,49 @@ export default function AdminDashboard() {
   const salvarDados = async (e: React.FormEvent) => {
     e.preventDefault();
     setCarregando(true);
+    setErroModal(""); 
 
     try {
       if (tipoModal === "turma" || tipoModal === "editar_turma") {
         await salvarTurma(novaTurma, idEdicao);
-      }else if (tipoModal === "editar_aluno" && alunoSelecionado?.perfil_id) {
+      } 
+      else if (tipoModal === "editar_aluno" && alunoSelecionado?.perfil_id) {
         await atualizarPerfil(alunoSelecionado.perfil_id, { nivel: nivelEdicao });
       }
       else if (tipoModal === "quadra") {
         await salvarQuadra(novoHorarioQuadra, idEdicao);
       } 
       else if (tipoModal === "efetivar_aluno" && alunoSelecionado) {
-        // alunoSelecionado aqui representa a matrícula
         await efetivarMatricula(alunoSelecionado.id);
+      }
+      else if (tipoModal === "professor") {
+      
+        await cadastrarNovoProfessor(novoProfessor);
+        alert("Professor cadastrado com sucesso!");
       }
       
       setModalAberto(false);
       buscarDados(); // Atualiza a vista com os novos dados
+      
     } catch (error) {
-      alert("Ocorreu um erro ao guardar as informações.");
-      console.error(error);
+      // 1. Captura a mensagem de erro bruta
+      let mensagemErro = error instanceof Error ? error.message : "Ocorreu um erro desconhecido ao guardar as informações.";
+
+      // 2. Traduz os erros de forma clara
+      if (mensagemErro === "whatsapp_duplicado" || (mensagemErro.includes("duplicate key") && mensagemErro.includes("whatsapp"))) {
+        mensagemErro = "Este número de WhatsApp já está cadastrado para outro utilizador no sistema.";
+      } 
+      else if (mensagemErro.includes("User already registered") || mensagemErro.includes("already exists")) {
+        mensagemErro = "Este e-mail já está cadastrado no sistema.";
+      }
+
+      // 3. Joga o erro traduzido para a UI vermelha
+      setErroModal(mensagemErro);
+    } finally {
+      setCarregando(false);
     }
-
-    setCarregando(false);
   };
-
+  
   const excluirItem = async (id: number, tabela: 'turmas' | 'horarios_quadra' | 'matriculas') => {
     if (confirm("Tem a certeza que deseja excluir este registo?")) {
       try {
@@ -197,6 +231,12 @@ export default function AdminDashboard() {
               </h2>
 
               <form onSubmit={salvarDados} className="space-y-4">
+                {erroModal && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-start gap-3 text-sm font-medium mb-4">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <p>{erroModal}</p>
+                  </div>
+                )}
                 {/* --- NOVA SECÇÃO: FICHA DO ALUNO --- */}
                 {tipoModal === "ver_aluno" && alunoSelecionado && (
                   <div className="space-y-4 pb-2">
@@ -244,7 +284,35 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 )}
-                {/* ----------------------------------- */}
+                {tipoModal === "professor" && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nome Completo</label>
+                      <input type="text" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.nome} onChange={e => setNovoProfessor({...novoProfessor, nome: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">E-mail</label>
+                      <input type="email" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.email} onChange={e => setNovoProfessor({...novoProfessor, email: e.target.value})} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
+                        <input 
+                          type="tel" 
+                          required 
+                          placeholder="(00) 00000-0000" 
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" 
+                          value={novoProfessor.whatsapp} 
+                          onChange={e => setNovoProfessor({...novoProfessor, whatsapp: maskPhone(e.target.value)})} 
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Senha Provisória</label>
+                        <input type="password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.senha} onChange={e => setNovoProfessor({...novoProfessor, senha: e.target.value})} />
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {tipoModal === "efetivar_aluno" && (
                   <>
                     <div className="mb-4 p-3 sm:p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl flex items-center gap-4">
@@ -471,10 +539,36 @@ export default function AdminDashboard() {
           <p className="text-sm sm:text-base text-slate-400 mt-1">Gerencie alunos e horários.</p>
         </div>
 
-        <div className="flex bg-slate-900 p-1 rounded-xl mb-8 border border-slate-800 max-w-3xl overflow-x-auto scrollbar-hide">
-          <button onClick={() => setAbaAtiva("alunos")} className={`flex-shrink-0 flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "alunos" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}><Users className="w-4 h-4" /> Alunos</button>
-          <button onClick={() => setAbaAtiva("turmas")} className={`flex-shrink-0 flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "turmas" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}><CalendarDays className="w-4 h-4" /> Turmas</button>
-          <button onClick={() => setAbaAtiva("aluguel")} className={`flex-shrink-0 flex-1 flex items-center justify-center gap-2 py-3 px-4 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "aluguel" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}><MapPin className="w-4 h-4" /> Quadras</button>
+        <div className="flex bg-slate-900 p-1 rounded-xl mb-8 border border-slate-800 max-w-4xl overflow-x-auto scrollbar-hide">
+          <button 
+            onClick={() => setAbaAtiva("alunos")} 
+            className={`flex-none sm:flex-1 whitespace-nowrap flex items-center justify-center gap-2 py-3 px-5 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "alunos" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
+          >
+            <Users className="w-4 h-4" /> Alunos
+          </button>
+          
+          <button 
+            onClick={() => setAbaAtiva("turmas")} 
+            className={`flex-none sm:flex-1 whitespace-nowrap flex items-center justify-center gap-2 py-3 px-5 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "turmas" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
+          >
+            <CalendarDays className="w-4 h-4" /> Turmas
+          </button>
+          
+          <button 
+            onClick={() => setAbaAtiva("aluguel")} 
+            className={`flex-none sm:flex-1 whitespace-nowrap flex items-center justify-center gap-2 py-3 px-5 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "aluguel" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
+          >
+            <MapPin className="w-4 h-4" /> Quadras
+          </button>
+          
+          {tipoLogado === "admin" && (
+            <button 
+              onClick={() => setAbaAtiva("professores")} 
+              className={`flex-none sm:flex-1 whitespace-nowrap flex items-center justify-center gap-2 py-3 px-5 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "professores" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
+            >
+              <Shield className="w-4 h-4" /> Professores
+            </button>
+          )}
         </div>
 
         {carregando && turmas.length === 0 && matriculas.length === 0 ? (
@@ -618,6 +712,47 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex justify-end w-full sm:w-auto border-t border-slate-800 pt-3 sm:border-t-0 sm:pt-0 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                          <button onClick={() => excluirItem(hq.id, 'horarios_quadra')} className="w-full sm:w-auto flex justify-center p-2.5 text-slate-400 bg-slate-800 sm:bg-transparent hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            {abaAtiva === "professores" && tipoLogado === "admin" && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-bold text-white">Corpo Docente</h2>
+                    <p className="text-xs sm:text-sm text-slate-400">Gerencie os professores da arena.</p>
+                  </div>
+                  <button onClick={() => { setTipoModal("professor"); setModalAberto(true); }} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white text-slate-950 px-4 py-3 sm:py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                    <UserPlus className="w-4 h-4" /> Novo Professor
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                  {professores.map(prof => (
+                    <div key={`prof-${prof.id}`} className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl flex items-center justify-between group gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 flex-shrink-0">{prof.nome.charAt(0)}</div>
+                        <div>
+                          <h3 className="font-bold text-white text-base leading-tight">{prof.nome}</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">{prof.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex justify-end sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={async () => { 
+                            if(confirm("Deseja EXCLUIR DEFINITIVAMENTE este professor? O acesso dele será permanentemente revogado.")) { 
+                              await excluirProfessor(prof.id); 
+                              buscarDados(); 
+                            } 
+                          }} 
+                          title="Excluir Professor Definitivamente" 
+                          className="p-2.5 text-slate-400 bg-slate-800 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
                       </div>
                     </div>
                   ))}

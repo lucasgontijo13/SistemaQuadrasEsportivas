@@ -86,3 +86,10 @@ export interface DadosLogin {
   identificador: string; // Pode ser e-mail ou WhatsApp
   senha: string;
 }
+
+export interface DadosNovoProfessor {
+  nome: string;
+  email: string;
+  whatsapp: string;
+  senha: string;
+}

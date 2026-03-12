@@ -1,10 +1,10 @@
 import { supabase } from "@/lib/supabase";
-import { Turma, HorarioQuadra, Matricula, Perfil } from "@/types";
+import { Turma, HorarioQuadra, Matricula, Perfil, DadosNovoProfessor } from "@/types";
 
-// 1. Verifica se o utilizador tem permissão para aceder ao painel
-export async function verificarPermissaoAdmin(): Promise<boolean> {
+// 1. Alterado para retornar também o 'tipo' exato do utilizador
+export async function verificarPermissaoAdmin(): Promise<{ autorizado: boolean; tipo: string }> {
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return false;
+  if (!session) return { autorizado: false, tipo: '' };
 
   const { data: perfil } = await supabase
     .from('perfis')
@@ -12,34 +12,68 @@ export async function verificarPermissaoAdmin(): Promise<boolean> {
     .eq('id', session.user.id)
     .single();
 
-  return perfil?.tipo === 'admin' || perfil?.tipo === 'professor';
+  return { 
+    autorizado: perfil?.tipo === 'admin' || perfil?.tipo === 'professor', 
+    tipo: perfil?.tipo || 'aluno'
+  };
 }
 
-// 2. Busca todos os dados necessários para o painel de uma só vez
+// 2. Atualizado para buscar a lista de professores
 export async function buscarDadosPainel() {
-  // Busca Turmas
-  const { data: turmasData } = await supabase
-    .from('turmas')
-    .select(`*, matriculas (id, status, perfis (id, nome, nivel, whatsapp, cpf, data_nascimento, contato_emergencia))`)
-    .order('id', { ascending: true });
+  const { data: turmasData } = await supabase.from('turmas').select(`*, matriculas (id, status, perfis (id, nome, nivel, whatsapp, cpf, data_nascimento, contato_emergencia))`).order('id', { ascending: true });
+  const { data: quadrasData } = await supabase.from('horarios_quadra').select('*').order('horario_inicio', { ascending: true });
+  const { data: matriculasData } = await supabase.from('matriculas').select(`id, status, perfil_id, turma_id, perfis (*), turmas (*)`).order('id', { ascending: false });
+  
 
-  // Busca Quadras
-  const { data: quadrasData } = await supabase
-    .from('horarios_quadra')
-    .select('*')
-    .order('horario_inicio', { ascending: true });
-
-  // Busca Matrículas (Exclusivo para preencher a aba "Alunos")
-  const { data: matriculasData } = await supabase
-    .from('matriculas')
-    .select(`id, status, perfil_id, turma_id, perfis (*), turmas (*)`)
-    .order('id', { ascending: false });
+  const { data: professoresData } = await supabase.from('perfis').select('*').eq('tipo', 'professor').order('nome', { ascending: true });
 
   return {
     turmas: (turmasData as Turma[]) || [],
     horariosQuadra: (quadrasData as HorarioQuadra[]) || [],
-    matriculas: (matriculasData as unknown as Matricula[]) || [] // Usamos any[] aqui temporariamente se a tipagem da Matricula não tiver a turma expandida
+    matriculas: (matriculasData as unknown as Matricula[]) || [],
+    professores: (professoresData as Perfil[]) || [] // <-- Adicionado
   };
+}
+
+
+
+// 7. Cadastrar Novo Professor 
+export async function cadastrarNovoProfessor(dados: DadosNovoProfessor) {
+  const response = await fetch('/api/professores', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(dados),
+  });
+
+  const resultado = await response.json();
+
+  if (!response.ok) {
+    throw new Error(resultado.erro || "Erro ao cadastrar professor");
+  }
+
+  return true;
+}
+
+// Excluir Professor Definitivamente (Apaga Auth e Banco de Dados)
+export async function excluirProfessor(perfilId: string) {
+  const response = await fetch(`/api/professores?id=${perfilId}`, {
+    method: 'DELETE'
+  });
+  
+  const resultado = await response.json();
+  
+  if (!response.ok) {
+    throw new Error(resultado.erro || "Erro ao excluir professor.");
+  }
+  
+  return true;
+}
+
+// 8. Remover Professor (Volta a ser Aluno para não quebrar o banco de dados)
+export async function rebaixarProfessor(perfilId: string) {
+  const { error } = await supabase.from('perfis').update({ tipo: 'aluno' }).eq('id', perfilId);
+  if (error) throw new Error(error.message);
+  return true;
 }
 
 // 3. Função genérica para excluir um registo
