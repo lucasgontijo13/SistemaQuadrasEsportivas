@@ -114,10 +114,7 @@ export default function AdminDashboard() {
     setModalAberto(true);
   };
 
-  const carregarSolicitacoes = async (perfilAtual: Perfil) => {
-    const dados = await buscarSolicitacoesPendentes(perfilAtual.id, perfilAtual.tipo);
-    setSolicitacoes(dados);
-  };
+
 
   useEffect(() => {
     async function verificarAcesso() {
@@ -844,6 +841,7 @@ export default function AdminDashboard() {
                                     await excluirRegistro('matriculas', mat.id);
                                     await buscarDados();
                                   } catch (error) {
+                                    console.error("Erro ao remover matrícula:", error); // Agora ele está sendo usado!
                                     alert("Erro ao remover matrícula.");
                                   } finally {
                                     setCarregando(false);
