@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ChevronLeft, CalendarDays, Loader2, Clock, UserCheck } from "lucide-react";
+import {CalendarDays, Loader2, Clock, UserCheck } from "lucide-react";
 
 // Importamos os tipos e o novo serviço
 import { Matricula } from "@/types";

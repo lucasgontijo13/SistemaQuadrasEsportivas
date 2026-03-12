@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Mail, Lock, Loader2, ArrowRight, AlertCircle, ChevronLeft, Phone } from "lucide-react";
+import { Mail, Lock, Loader2, ArrowRight, AlertCircle, Phone } from "lucide-react";
 import { iniciarSessao } from "@/services/authService";
 
 export default function LoginPage() {
@@ -20,14 +20,9 @@ export default function LoginPage() {
     setErro("");
 
     try {
-      const { tipo } = await iniciarSessao({ identificador, senha });
+      await iniciarSessao({ identificador, senha });
 
-      // Redirecionamento baseado no tipo de perfil
-      if (tipo === 'admin' || tipo === 'professor') {
-        router.push("/admin");
-      } else {
-        router.push("/agenda");
-      }
+      router.push("/");
     } catch (err) {
       const mensagem = err instanceof Error ? err.message : "Erro ao entrar no sistema.";
       setErro(mensagem);

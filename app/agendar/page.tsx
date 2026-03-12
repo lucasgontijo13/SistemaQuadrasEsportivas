@@ -70,7 +70,8 @@ export default function AgendarPage() {
     e.preventDefault();
     setSalvando(true);
     setErroAgendamento("");
-
+    
+    if (!turmaSelecionada) return;
     // O serviço agora cuida de verificar senhas, buscar no banco e inserir.
     const resultado = await processarAgendamento(dadosAluno, turmaSelecionada.id);
 
