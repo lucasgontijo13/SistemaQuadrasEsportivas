@@ -69,12 +69,7 @@ export async function excluirProfessor(perfilId: string) {
   return true;
 }
 
-// 8. Remover Professor (Volta a ser Aluno para não quebrar o banco de dados)
-export async function rebaixarProfessor(perfilId: string) {
-  const { error } = await supabase.from('perfis').update({ tipo: 'aluno' }).eq('id', perfilId);
-  if (error) throw new Error(error.message);
-  return true;
-}
+
 
 // 3. Função genérica para excluir um registo
 export async function excluirRegistro(tabela: 'turmas' | 'horarios_quadra' | 'matriculas', id: number) {
@@ -127,3 +122,35 @@ export async function atualizarPerfil(perfilId: string, dados: Partial<Perfil>) 
   if (error) throw new Error(error.message);
   return true;
 }
+
+export const buscarSolicitacoesPendentes = async (perfilId: string, tipoPerfil: string) => {
+  let query = supabase
+    .from('solicitacoes_aula_experimental')
+    .select('*')
+    .eq('status', 'pendente')
+    .order('created_at', { ascending: false });
+
+  // Se for professor, busca apenas as solicitações direcionadas a ele ou as "sem professor" (nulo)
+  if (tipoPerfil === 'professor') {
+    query = query.or(`professor_id.eq.${perfilId},professor_id.is.null`);
+  }
+
+  const { data, error } = await query;
+  
+  if (error) {
+    console.error("Erro ao buscar solicitações:", error);
+    return [];
+  }
+  return data;
+};
+
+
+
+export const atribuirProfessorSolicitacao = async (solicitacaoId: string, professorId: string | null) => {
+  const { error } = await supabase
+    .from('solicitacoes_aula_experimental')
+    .update({ professor_id: professorId })
+    .eq('id', solicitacaoId);
+
+  if (error) throw error;
+};

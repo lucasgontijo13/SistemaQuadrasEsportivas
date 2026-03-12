@@ -104,7 +104,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-slate-500 text-sm mt-8">
-          Ainda não tem conta? <Link href="/agendar" className="text-orange-500 font-bold hover:underline">Agende uma aula</Link>
+          Ainda não tem conta? <Link href="/aula-experimental" className="text-orange-500 font-bold hover:underline">Agende uma aula</Link>
         </p>
       </motion.div>
     </div>

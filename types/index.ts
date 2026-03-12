@@ -8,6 +8,12 @@ export interface Perfil {
   cpf?: string;
   data_nascimento?: string;
   contato_emergencia?: string;
+  cep?: string;
+  rua?: string;
+  numero?: string;
+  sexo?: string;
+  necessidade_especial?: string;
+  objetivo?: string;
 }
 
 export interface Matricula {
@@ -92,4 +98,15 @@ export interface DadosNovoProfessor {
   email: string;
   whatsapp: string;
   senha: string;
+}
+
+export interface SolicitacaoAula {
+  id: string;
+  created_at: string;
+  nome_aluno: string;
+  telefone_aluno: string;
+  horarios_preferencia: string;
+  professor_id: string | null;
+  status: 'pendente' | 'em_contato' | 'agendado';
+  nivel_experiencia?: string;
 }

@@ -4,16 +4,18 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Users, CheckCircle2, Loader2, CalendarDays, Plus, 
-  Trash2, X, Clock, MapPin, Edit2, UserCheck, Shield, UserPlus, AlertCircle, AlertTriangle 
+  Trash2, X, Clock, MapPin, Edit2, UserCheck, Shield, UserPlus, AlertCircle, AlertTriangle,
+  MessageCircle, BellRing, Eye
 } from "lucide-react";
 
-import { Turma, HorarioQuadra, Matricula, Perfil } from "@/types";
+import { Turma, HorarioQuadra, Matricula, Perfil, SolicitacaoAula } from "@/types";
 import { 
   verificarPermissaoAdmin, buscarDadosPainel, excluirRegistro, salvarTurma, 
   salvarQuadra, efetivarMatricula, atualizarPerfil,
-  cadastrarNovoProfessor, excluirProfessor 
+  cadastrarNovoProfessor, excluirProfessor, buscarSolicitacoesPendentes,
+  atribuirProfessorSolicitacao
 } from "@/services/adminService";
-
+import { supabase } from "@/lib/supabase";
 
 
 const maskPhone = (value: string) => {
@@ -27,9 +29,11 @@ const maskPhone = (value: string) => {
 };
 
 export default function AdminDashboard() {
+  const [dadosExtrasAluno, setDadosExtrasAluno] = useState<Perfil | null>(null);
+  const [solicitacoes, setSolicitacoes] = useState<SolicitacaoAula[]>([]);
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
-  const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel" | "professores">("alunos");
+  const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel" | "professores" | "solicitacoes">("solicitacoes");
   const [modalConfirmacao, setModalConfirmacao] = useState({ aberto: false, titulo: "", mensagem: "", acao: () => {} });
   const [matriculas, setMatriculas] = useState<Matricula[]>([]);
   const [turmas, setTurmas] = useState<Turma[]>([]);
@@ -40,12 +44,15 @@ export default function AdminDashboard() {
   const [tipoLogado, setTipoLogado] = useState<string>(""); // Para saber se é admin ou professor
   const [professores, setProfessores] = useState<Perfil[]>([]); // Lista de professores
   
+  const [usuarioLogadoId, setUsuarioLogadoId] = useState<string>("");
+  const [solicitacaoSelecionada, setSolicitacaoSelecionada] = useState<SolicitacaoAula | null>(null);
+  const [professorAtribuido, setProfessorAtribuido] = useState<string>("");
 
   // Adicione o modal de sucesso junto do modal de confirmação
   const [modalSucesso, setModalSucesso] = useState({ aberto: false, titulo: "", mensagem: "" });
   
   // Atualize o tipoModal para aceitar "editar_professor"
-  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno" | "professor" | "editar_professor">("turma");
+  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno" | "professor" | "editar_professor" | "ver_solicitacao">("turma");
   
   // Novo estado para guardar o ID do professor que está a ser editado
   const [idEdicaoProfessor, setIdEdicaoProfessor] = useState<string | null>(null);
@@ -107,16 +114,34 @@ export default function AdminDashboard() {
     setModalAberto(true);
   };
 
+  const carregarSolicitacoes = async (perfilAtual: Perfil) => {
+    const dados = await buscarSolicitacoesPendentes(perfilAtual.id, perfilAtual.tipo);
+    setSolicitacoes(dados);
+  };
+
   useEffect(() => {
     async function verificarAcesso() {
-      const { autorizado, tipo } = await verificarPermissaoAdmin(); // Desestrutura o retorno
-      if (!autorizado) {
+      // Pega a sessão para sabermos o ID do professor logado
+      const { data: { session } } = await supabase.auth.getSession();
+      const { autorizado, tipo } = await verificarPermissaoAdmin(); 
+      
+      if (!autorizado || !session) {
         router.push("/");
         return;
       }
-      setTipoLogado(tipo); // Salva o tipo (admin/professor) no estado
+
+      setUsuarioLogadoId(session.user.id);
+      setTipoLogado(tipo);
+
       setAutorizado(true);
+      
+      // Busca as turmas, quadras e alunos matriculados
       await buscarDados();
+
+      // MÁGICA AQUI: Busca as solicitações de aula experimental pendentes!
+      const pendentes = await buscarSolicitacoesPendentes(session.user.id, tipo);
+      setSolicitacoes(pendentes);
+
       setCarregando(false);
     }
     verificarAcesso();
@@ -180,6 +205,13 @@ export default function AdminDashboard() {
           whatsapp: novoProfessor.whatsapp.replace(/\D/g, "") 
         });
         setModalSucesso({ aberto: true, titulo: "Professor Atualizado", mensagem: "Os dados foram salvos com sucesso." });
+      }else if (tipoModal === "ver_solicitacao" && solicitacaoSelecionada) {
+        const profId = professorAtribuido === "" ? null : professorAtribuido;
+        await atribuirProfessorSolicitacao(solicitacaoSelecionada.id, profId);
+        
+        // Atualiza a lista na tela sem precisar recarregar o banco
+        setSolicitacoes(prev => prev.map(s => s.id === solicitacaoSelecionada.id ? { ...s, professor_id: profId } : s));
+        setModalSucesso({ aberto: true, titulo: "Professor Atribuído", mensagem: "A solicitação foi atualizada com sucesso." });
       }
       
       setModalAberto(false);
@@ -236,6 +268,11 @@ export default function AdminDashboard() {
         }
       }
     });
+  };
+  const abrirWhatsApp = (solicitacao: SolicitacaoAula) => {
+    const foneLimpo = solicitacao.telefone_aluno.replace(/\D/g, '');
+    const mensagem = `Olá, ${solicitacao.nome_aluno}! Vi que você solicitou uma Aula Experimental de Futevôlei com a gente. Vamos agendar?`;
+    window.open(`https://wa.me/55${foneLimpo}?text=${encodeURIComponent(mensagem)}`, '_blank');
   };
 
   const abrirModal = (tipo: "turma" | "quadra") => {
@@ -331,9 +368,128 @@ export default function AdminDashboard() {
                         <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Contacto de Emergência</p>
                         <p className="text-sm text-slate-300">{alunoSelecionado.perfis?.contato_emergencia || "Pendente"}</p>
                       </div>
+                      <div className="grid grid-cols-2 gap-3 mt-3">
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Sexo</p>
+                          <p className="text-sm text-slate-300">{alunoSelecionado.perfis?.sexo || "Não informado"}</p>
+                        </div>
+                        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Objetivo</p>
+                          <p className="text-sm text-slate-300 italic truncate" title={alunoSelecionado.perfis?.objetivo}>
+                            {alunoSelecionado.perfis?.objetivo || "Não preenchido"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {alunoSelecionado.perfis?.necessidade_especial && (
+                        <div className="bg-red-500/10 p-3 rounded-xl border border-red-500/20 mt-3">
+                          <p className="text-[10px] text-red-400 uppercase font-bold tracking-wider mb-1">Atenção: Restrição / Necessidade</p>
+                          <p className="text-sm text-slate-300">{alunoSelecionado.perfis?.necessidade_especial}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
+                {tipoModal === "ver_solicitacao" && solicitacaoSelecionada && (
+                  <div className="space-y-5 pb-4">
+                    {/* Info Card Completo do Aluno */}
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-bold text-white text-lg mb-1">{solicitacaoSelecionada.nome_aluno}</h3>
+                          <p className="text-slate-400 text-sm">{solicitacaoSelecionada.telefone_aluno}</p>
+                        </div>
+                        <span className="bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] uppercase font-bold px-2 py-1 rounded whitespace-nowrap flex-shrink-0">
+                          {dadosExtrasAluno?.nivel || solicitacaoSelecionada.nivel_experiencia || 'NÍVEL NÃO INFO.'}
+                        </span>
+                      </div>
+                      
+                      {/* Sexo na sua própria linha */}
+                      <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 mb-3">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Sexo</p>
+                        <p className="text-sm text-slate-300">{dadosExtrasAluno?.sexo || 'Não informado'}</p>
+                      </div>
+
+                      {/* Preferência de Horário na sua própria linha (sem cortes) */}
+                      <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 mb-3">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Preferência de Horário</p>
+                        <p className="text-sm text-slate-300 whitespace-pre-wrap">
+                          {solicitacaoSelecionada.horarios_preferencia}
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 mb-3">
+                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Objetivo / Motivação</p>
+                        <p className="text-sm text-slate-300 italic">{dadosExtrasAluno?.objetivo || 'Não preenchido'}</p>
+                      </div>
+
+                      {dadosExtrasAluno?.necessidade_especial && (
+                        <div className="bg-red-500/10 p-3 rounded-lg border border-red-500/20 mb-3">
+                          <p className="text-[10px] text-red-400 uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" /> Atenção: Restrição / Necessidade
+                          </p>
+                          <p className="text-sm text-slate-300">{dadosExtrasAluno?.necessidade_especial}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Atribuir Professor */}
+                    <div>
+                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">
+                        Professor Responsável pela Aula
+                      </label>
+                      <select
+                        value={professorAtribuido}
+                        onChange={(e) => setProfessorAtribuido(e.target.value)}
+                        // A MÁGICA ACONTECE AQUI: Desabilita se NÃO for admin E já existir um professor salvo
+                        disabled={tipoLogado !== "admin" && !!solicitacaoSelecionada?.professor_id}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm disabled:opacity-50 disabled:bg-slate-900 disabled:cursor-not-allowed"
+                      >
+                        <option value="">Ainda não definido (Qualquer um)</option>
+                        {tipoLogado === "admin" ? (
+                          professores.map(prof => (
+                            <option key={prof.id} value={prof.id}>{prof.nome}</option>
+                          ))
+                        ) : (
+                          professores
+                            .filter(prof => prof.id === usuarioLogadoId)
+                            .map(prof => (
+                              <option key={prof.id} value={prof.id}>{prof.nome}</option>
+                          ))
+                        )}
+                      </select>
+                      
+                      {/* AVISO VISUAL PARA O PROFESSOR */}
+                      {tipoLogado !== "admin" && !!solicitacaoSelecionada?.professor_id && (
+                        <p className="text-[10.5px] text-orange-400 mt-2 font-medium bg-orange-500/10 p-2 rounded-lg border border-orange-500/20">
+                          * O aluno já indicou a preferência por este professor. Apenas Administradores podem alterar a atribuição.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Botões de Ação */}
+                    <div className="flex flex-col gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => abrirWhatsApp(solicitacaoSelecionada)}
+                        className="w-full flex items-center justify-center gap-2 bg-[#25D366] text-white font-bold py-3.5 rounded-xl hover:bg-[#1ebd5a] transition-colors shadow-lg"
+                      >
+                        <MessageCircle className="w-5 h-5" />
+                        Entrar em Contato
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => alert("Em breve: Fluxo para agendar a aula no calendário!")}
+                        className="w-full flex items-center justify-center gap-2 bg-orange-500 text-slate-950 font-bold py-3.5 rounded-xl hover:bg-orange-600 transition-colors shadow-lg"
+                      >
+                        <CalendarDays className="w-5 h-5" />
+                        Marcar Aula
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
                 {(tipoModal === "professor" || tipoModal === "editar_professor") && (
                   <div className="space-y-4">
                     <div>
@@ -575,7 +731,7 @@ export default function AdminDashboard() {
 
                 {tipoModal !== "ver_aluno" && (
                   <button type="submit" disabled={carregando} className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50">
-                    {carregando ? "Processando..." : tipoModal === "editar_turma" ? "Salvar Alterações" : tipoModal === "efetivar_aluno" ? "Confirmar Matrículas" : "Salvar no Sistema"}
+                    {carregando ? "Processando..." : tipoModal === "editar_turma" ? "Salvar Alterações" : tipoModal === "efetivar_aluno" ? "Confirmar Matrículas" : "Salvar professor"}
                   </button>
                 )}
               </form>
@@ -592,6 +748,18 @@ export default function AdminDashboard() {
         </div>
 
         <div className="flex bg-slate-900 p-1 rounded-xl mb-8 border border-slate-800 max-w-4xl overflow-x-auto scrollbar-hide">
+          <button 
+            onClick={() => setAbaAtiva("solicitacoes")} 
+            className={`flex-none sm:flex-1 whitespace-nowrap flex items-center justify-center gap-2 py-3 px-5 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "solicitacoes" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
+          >
+            <div className="relative">
+              <BellRing className="w-4 h-4" />
+              {solicitacoes.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full animate-pulse border-2 border-slate-900"></span>
+              )}
+            </div>
+            Novos Alunos
+          </button>
           <button 
             onClick={() => setAbaAtiva("alunos")} 
             className={`flex-none sm:flex-1 whitespace-nowrap flex items-center justify-center gap-2 py-3 px-5 text-xs sm:text-sm font-bold rounded-lg transition-all ${abaAtiva === "alunos" ? "bg-slate-800 text-white shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
@@ -694,7 +862,73 @@ export default function AdminDashboard() {
                 )}
               </motion.div>
             )}
+            {abaAtiva === "solicitacoes" && (
+              <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-bold text-white">Solicitações de Aula</h2>
+                    <p className="text-xs sm:text-sm text-slate-400">Novos alunos aguardando contato para agendar aula.</p>
+                  </div>
+                </div>
 
+                {solicitacoes.length === 0 ? (
+                  <div className="text-center py-20 bg-slate-900/30 rounded-2xl border border-slate-800/50 text-slate-500 text-sm">
+                    Nenhuma solicitação pendente no momento.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {solicitacoes.map((solicitacao) => (
+                      <div key={solicitacao.id} className="bg-slate-900 border border-slate-700 p-5 rounded-2xl flex flex-col justify-between">
+                        
+                        {/* INÍCIO DO CARD COM A ETIQUETA LARANJA */}
+                        <div>
+                          <div className="flex justify-between items-start mb-1">
+                            <h3 className="font-bold text-lg text-white truncate pr-2">{solicitacao.nome_aluno}</h3>
+                            <span className="bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] uppercase font-bold px-2 py-1 rounded whitespace-nowrap flex-shrink-0">
+                              {solicitacao.nivel_experiencia || 'NÍVEL NÃO INFO.'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-400 mb-3">{solicitacao.telefone_aluno}</p>
+                          
+                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 mb-4">
+                            <p className="text-xs text-slate-500 mb-1 uppercase font-bold tracking-wider">Preferência de Horário</p>
+                            <p className="text-sm text-slate-300 italic">{solicitacao.horarios_preferencia}</p>
+                          </div>
+                        </div>
+                        {/* FIM DO CARD */}
+
+                        {/* BOTÃO DE VISUALIZAR QUE BUSCA OS DADOS */}
+                        <button 
+                          onClick={async () => {
+                            setSolicitacaoSelecionada(solicitacao);
+                            setProfessorAtribuido(solicitacao.professor_id || "");
+                            setTipoModal("ver_solicitacao");
+                            setDadosExtrasAluno(null); // Limpa os dados do aluno anterior
+                            setModalAberto(true);
+
+                            // Busca os dados físicos/objetivo na tabela de Perfis usando o WhatsApp
+                            const foneLimpo = solicitacao.telefone_aluno.replace(/\D/g, '');
+                            const { data } = await supabase
+                              .from('perfis')
+                              .select('*')
+                              .eq('whatsapp', foneLimpo)
+                              .single();
+
+                            if (data) {
+                              setDadosExtrasAluno(data);
+                            }
+                          }}
+                          className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-700 transition-colors shadow-lg shadow-slate-900/20 mt-4 border border-slate-700 hover:border-slate-600"
+                        >
+                          <Eye className="w-5 h-5" />
+                          Visualizar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
             {abaAtiva === "turmas" && (
               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">

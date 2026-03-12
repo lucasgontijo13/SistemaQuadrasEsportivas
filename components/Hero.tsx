@@ -63,7 +63,7 @@ export function Hero() {
               </motion.button>
             </Link>
           ) : (
-            <Link href="/agendar" className="w-full sm:w-auto">
+            <Link href="/aula-experimental" className="w-full sm:w-auto">
               <motion.button 
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
