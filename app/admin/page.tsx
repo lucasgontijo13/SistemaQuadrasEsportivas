@@ -585,15 +585,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
-          <div className="font-bold text-lg sm:text-xl tracking-tighter text-white flex items-center gap-2 sm:gap-3">
-            Arena<span className="text-orange-500">.Pro</span>
-            <span className="px-1.5 py-0.5 sm:px-2 sm:py-1 bg-slate-800 text-slate-400 text-[10px] sm:text-xs rounded-md uppercase tracking-wider font-semibold">Admin</span>
-          </div>
-          <Link href="/" className="text-xs sm:text-sm font-medium text-slate-400 hover:text-white transition-colors flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Sair</Link>
-        </div>
-      </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-10">
         <div className="mb-6 sm:mb-8">

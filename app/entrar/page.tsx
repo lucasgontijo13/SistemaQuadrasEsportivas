@@ -38,12 +38,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-orange-500 selection:text-white relative">
       
-      <div className="absolute top-6 sm:top-10 left-6 sm:left-10">
-        <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-          <ChevronLeft className="w-5 h-5" />
-          <span className="font-medium text-sm">Voltar</span>
-        </Link>
-      </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
         <div className="text-center mb-10">

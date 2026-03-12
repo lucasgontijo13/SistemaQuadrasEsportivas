@@ -39,16 +39,7 @@ export default function AgendaPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-20">
-      <header className="border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-3xl mx-auto px-6 h-20 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-            <ChevronLeft className="w-5 h-5" />
-            <span className="font-medium text-sm">Voltar</span>
-          </Link>
-          <div className="font-bold text-xl tracking-tighter text-white">Arena<span className="text-orange-500">.Pro</span></div>
-          <div className="w-16"></div>
-        </div>
-      </header>
+
 
       <main className="max-w-2xl mx-auto px-6 pt-10">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
