@@ -2,13 +2,24 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation"; // Importados para navegação
 import { motion, AnimatePresence } from "framer-motion";
-import { User as UserIcon, LogOut, Loader2, ShieldCheck, CalendarDays, Bell } from "lucide-react";
+import { 
+  User as UserIcon, LogOut, Loader2, ShieldCheck, 
+  CalendarDays, Bell, ChevronLeft 
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { User } from "@supabase/supabase-js"; // Importa o tipo oficial do Supabase
+import { Perfil } from "@/types"; // Importa a sua interface de perfil
+
 
 export function Navbar() {
-  const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
-  const [perfil, setPerfil] = useState<any>(null);
+  const pathname = usePathname();
+  const router = useRouter();
+  const isHome = pathname === "/";
+
+  const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const [usuarioLogado, setUsuarioLogado] = useState<User | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [menuAberto, setMenuAberto] = useState(false);
   const [temPendencia, setTemPendencia] = useState(false);
@@ -58,6 +69,7 @@ export function Navbar() {
     setUsuarioLogado(null);
     setPerfil(null);
     setMenuAberto(false);
+    router.push("/entrar");
   };
 
   return (
@@ -68,17 +80,32 @@ export function Navbar() {
       className="border-b border-slate-800 bg-slate-950/70 backdrop-blur-lg fixed top-0 w-full z-50"
     >
       <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
-        <Link href="/">
-          <div className="font-bold text-2xl tracking-tighter text-white">
+        
+        {/* LADO ESQUERDO: Botão Voltar */}
+        <div className="flex-1">
+          {!isHome && (
+            <button 
+              onClick={() => router.back()}
+              className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors group"
+            >
+              <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+              <span className="font-medium text-sm hidden sm:inline">Voltar</span>
+            </button>
+          )}
+        </div>
+
+        {/* CENTRO: Logo */}
+        <Link href="/" className="flex-shrink-0">
+          <div className="font-bold text-2xl tracking-tighter text-white text-center">
             Arena<span className="text-orange-500">.Pro</span>
           </div>
         </Link>
 
-        <div className="flex items-center gap-4">
+        {/* LADO DIREITO: Menu e Ações */}
+        <div className="flex-1 flex justify-end gap-4 items-center">
           {carregando ? (
             <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
           ) : usuarioLogado && perfil ? (
-            
             <div className="flex items-center gap-3">
               {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
                 <Link 
@@ -90,7 +117,6 @@ export function Navbar() {
                 </Link>
               )}
 
-              {/* MENU DO USUÁRIO */}
               <div className="relative">
                 <button 
                   onClick={() => setMenuAberto(!menuAberto)}
@@ -113,29 +139,13 @@ export function Navbar() {
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
                       className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-2"
                     >
-                      <div className="px-4 py-3 border-b border-slate-800 mb-2 sm:hidden">
-                        <p className="text-sm font-bold text-white">{perfil.nome}</p>
-                        <p className="text-[10px] text-orange-400 uppercase tracking-wider font-bold">{perfil.tipo}</p>
-                      </div>
-
                       <Link href="/agenda" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <CalendarDays className="w-4 h-4" /> Minha Agenda
                       </Link>
-
                       <Link href="/perfil" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <UserIcon className="w-4 h-4" /> Meu Perfil
                       </Link>
-
-                      <div className="sm:hidden">
-                        {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
-                          <Link href="/admin" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
-                            <ShieldCheck className="w-4 h-4" /> Painel Admin
-                          </Link>
-                        )}
-                      </div>
-
                       <div className="h-px bg-slate-800 my-2"></div>
-                      
                       <button onClick={fazerLogout} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors text-left">
                         <LogOut className="w-4 h-4" /> Sair da conta
                       </button>
@@ -144,7 +154,6 @@ export function Navbar() {
                 </AnimatePresence>
               </div>
 
-              {/* SININHO NO EXTREMO DIREITO */}
               <div className="relative">
                 <button 
                   onClick={() => setNotificacaoAberta(!notificacaoAberta)}
@@ -166,7 +175,6 @@ export function Navbar() {
                     >
                       <h4 className="text-white font-bold mb-2 text-sm">Notificações</h4>
                       <div className="h-px bg-slate-800 mb-3" />
-                      
                       {temPendencia ? (
                         <Link 
                           href="/perfil" 
@@ -174,9 +182,7 @@ export function Navbar() {
                           className="block p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl hover:bg-orange-500/20 transition-all"
                         >
                           <p className="text-xs text-orange-400 font-bold mb-1">📝 Dados pendentes!</p>
-                          <p className="text-[11px] text-slate-400 leading-tight">
-                            Sua aula foi aprovada! Clique aqui para completar seus dados no perfil.
-                          </p>
+                          <p className="text-[11px] text-slate-400 leading-tight">Complete seus dados no perfil para validar a matrícula.</p>
                         </Link>
                       ) : (
                         <p className="text-xs text-slate-500 text-center py-4">Nenhuma notificação nova.</p>
@@ -185,19 +191,14 @@ export function Navbar() {
                   )}
                 </AnimatePresence>
               </div>
-              
             </div>
-
           ) : (
-            /* BOTÕES PARA UTILIZADORES SEM SESSÃO INICIADA */
-            <div className="flex items-center gap-4">
-              <Link 
-                href="/entrar" 
-                className="text-sm font-bold text-slate-300 hover:text-white transition-colors border border-slate-800 px-5 py-2.5 rounded-full hover:bg-slate-900"
-              >
-                Entrar
-              </Link>
-            </div>
+            <Link 
+              href="/entrar" 
+              className="text-sm font-bold text-slate-300 hover:text-white transition-colors border border-slate-800 px-5 py-2.5 rounded-full hover:bg-slate-900"
+            >
+              Entrar
+            </Link>
           )}
         </div>
       </div>

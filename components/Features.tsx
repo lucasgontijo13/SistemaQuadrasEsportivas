@@ -1,16 +1,23 @@
 "use client";
-import { motion } from "framer-motion";
 import { MapPin, Trophy, Users } from "lucide-react";
+import { motion, Variants } from "framer-motion";
 
 export function Features() {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     show: { opacity: 1, transition: { staggerChildren: 0.2 } }
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 30 },
-    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 50 } }
+    show: { 
+      opacity: 1, 
+      y: 0, 
+      transition: { 
+        type: "spring", // Agora o TS sabe que este "spring" é o valor correto
+        stiffness: 50 
+      } 
+    }
   };
 
   const featuresList = [
