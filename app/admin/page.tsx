@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Users, ChevronLeft, CheckCircle2, Loader2, CalendarDays, Plus, 
-  Trash2, X, Clock, MapPin, Edit2, UserCheck, Shield, UserPlus, AlertCircle 
+  Trash2, X, Clock, MapPin, Edit2, UserCheck, Shield, UserPlus, AlertCircle, AlertTriangle 
 } from "lucide-react";
 
 import { Turma, HorarioQuadra, Matricula, Perfil } from "@/types";
@@ -14,6 +14,8 @@ import {
   salvarQuadra, efetivarMatricula, atualizarPerfil,
   cadastrarNovoProfessor, excluirProfessor 
 } from "@/services/adminService";
+
+
 
 const maskPhone = (value: string) => {
   if (!value) return "";
@@ -29,7 +31,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
   const [abaAtiva, setAbaAtiva] = useState<"alunos" | "turmas" | "aluguel" | "professores">("alunos");
-  
+  const [modalConfirmacao, setModalConfirmacao] = useState({ aberto: false, titulo: "", mensagem: "", acao: () => {} });
   const [matriculas, setMatriculas] = useState<Matricula[]>([]);
   const [turmas, setTurmas] = useState<Turma[]>([]);
   const [horariosQuadra, setHorariosQuadra] = useState<HorarioQuadra[]>([]);
@@ -610,7 +612,31 @@ export default function AdminDashboard() {
                           >
                             <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
                           </button>
-                          <button onClick={() => excluirItem(mat.id, 'matriculas')} className="p-2 sm:p-2.5 text-slate-500 bg-slate-800 sm:bg-transparent hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all sm:opacity-0 group-hover:opacity-100 flex-shrink-0"><Trash2 className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+                          <button 
+                            onClick={() => {
+                              setModalConfirmacao({
+                                aberto: true,
+                                titulo: "Remover Aluno da Turma",
+                                mensagem: "Tem a certeza? O perfil continuará no sistema para evitar novos cadastros gratuitos, mas ele será removido desta turma.",
+                                acao: async () => {
+                                  setModalConfirmacao(prev => ({ ...prev, aberto: false }));
+                                  setCarregando(true);
+                                  try {
+                                    // Lógica original: Exclui APENAS a matrícula
+                                    await excluirRegistro('matriculas', mat.id);
+                                    await buscarDados();
+                                  } catch (error) {
+                                    alert("Erro ao remover matrícula.");
+                                  } finally {
+                                    setCarregando(false);
+                                  }
+                                }
+                              });
+                            }} 
+                            className="p-2 sm:p-2.5 text-slate-500 bg-slate-800 sm:bg-transparent hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all sm:opacity-0 group-hover:opacity-100 flex-shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                          </button>
                         </div>
                       </motion.div>
                     ))}
@@ -761,6 +787,48 @@ export default function AdminDashboard() {
             )}
           </>
         )}
+        <AnimatePresence>
+          {modalConfirmacao.aberto && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+               {/* Fundo escuro */}
+               <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
+                onClick={() => setModalConfirmacao({ ...modalConfirmacao, aberto: false })}
+                className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" 
+              />
+
+              {/* Caixa do Modal */}
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0 }} 
+                animate={{ scale: 1, opacity: 1 }} 
+                exit={{ scale: 0.95, opacity: 0 }} 
+                className="bg-slate-900 border border-slate-800 p-8 rounded-[2rem] shadow-2xl w-full max-w-sm text-center relative z-10"
+              >
+                <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <AlertTriangle className="w-10 h-10" />
+                </div>
+                
+                <h2 className="text-xl font-bold text-white mb-2">{modalConfirmacao.titulo}</h2>
+                <p className="text-sm text-slate-400 mb-8 leading-relaxed">{modalConfirmacao.mensagem}</p>
+                
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setModalConfirmacao({ ...modalConfirmacao, aberto: false })} 
+                    className="flex-1 py-3.5 bg-slate-800 text-white font-bold text-sm rounded-xl hover:bg-slate-700 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={modalConfirmacao.acao} 
+                    className="flex-1 py-3.5 bg-red-600 text-white font-bold text-sm rounded-xl hover:bg-red-700 transition-colors"
+                  >
+                    Sim, Remover
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );

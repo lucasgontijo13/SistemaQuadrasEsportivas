@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Turma, Perfil, Matricula } from "@/types";
 
-// IMPORTAMOS O NOSSO NOVO SERVIÇO AQUI!
+
 import { buscarTurmasComAlunos, buscarPerfilLogado, processarAgendamento } from "@/services/agendamentoService";
 
 const diasSemana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
