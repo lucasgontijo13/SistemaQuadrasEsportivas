@@ -2,9 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   typescript: {
-    ignoreBuildErrors: true,
+    // Ignora erros de TS na Vercel
+    ignoreBuildErrors: true, 
   },
-  // Adicione este bloco de imagens:
   images: {
     remotePatterns: [
       {
