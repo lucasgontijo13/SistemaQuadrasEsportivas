@@ -187,7 +187,7 @@ export default function AdminDashboard() {
               initial={{ scale: 0.95, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
               exit={{ scale: 0.95, opacity: 0 }} 
-              className="bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-[2rem] shadow-2xl w-full max-w-md relative z-10 max-h-[85vh] overflow-y-auto scrollbar-hide"
+              className={`bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-[2rem] shadow-2xl w-full relative z-10 max-h-[85vh] overflow-y-auto scrollbar-hide ${tipoModal === "efetivar_aluno" ? "max-w-lg sm:max-w-xl" : "max-w-md"}`}
             >
               
               <button onClick={() => setModalAberto(false)} className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors bg-slate-800/50 p-2 rounded-full"><X className="w-5 h-5" /></button>
@@ -289,30 +289,101 @@ export default function AdminDashboard() {
                         })}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                      <div className="flex flex-col gap-3 mt-4">
                         {turmasFiltradasNoModal.length === 0 ? (
-                          <p className="text-xs text-slate-500 col-span-1 sm:col-span-2 py-3 text-center bg-slate-950 rounded-xl border border-slate-800">
-                            Sem turmas neste dia.
+                          <p className="text-xs text-slate-500 py-6 text-center bg-slate-950 rounded-xl border border-slate-800">
+                            Nenhuma turma disponível neste dia.
                           </p>
                         ) : (
                           turmasFiltradasNoModal.map(t => {
                             const selecionado = dadosEfetivacao.turmasIds.includes(t.id);
+                            const lotacao = t.matriculas?.length || 0;
+                            const estaCheia = lotacao >= t.vagas_totais;
+                            const disabled = estaCheia && !selecionado; // Impede seleção se estiver cheia (e não for a atual)
+                            
+                            // Verifica se o aluno que estamos a efetivar já faz parte desta turma (como experimental)
+                            const alunoJaNaTurma = t.matriculas?.some((m: Matricula) => m.perfis?.id === dadosEfetivacao.perfilId);
+
                             return (
                               <div 
                                 key={t.id} 
-                                onClick={() => toggleTurmaEfetivacao(t.id)}
-                                className={`cursor-pointer border rounded-xl p-3 text-sm transition-all flex justify-between items-center ${
-                                  selecionado ? "bg-orange-500/10 border-orange-500 text-orange-400" : "bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white"
+                                onClick={() => { if (!disabled) toggleTurmaEfetivacao(t.id) }}
+                                className={`border rounded-2xl p-4 transition-all relative overflow-hidden flex flex-col gap-3 ${
+                                  disabled ? "bg-slate-950/50 border-slate-800/50 cursor-not-allowed opacity-60" :
+                                  selecionado ? "bg-orange-500/5 border-orange-500 cursor-pointer shadow-[0_0_15px_rgba(249,115,22,0.1)]" : "bg-slate-950 border-slate-800 cursor-pointer hover:border-slate-700 hover:bg-slate-900"
                                 }`}
                               >
-                                <div>
-                                  <div className="flex items-center gap-2 mb-0.5">
-                                    <span className="font-bold">{t.dia_semana.substring(0,3)}</span>
-                                    <span className={selecionado ? "text-white font-bold" : "text-slate-300 font-bold"}>{t.horario.substring(0,5)}</span>
+                                {/* HEADER DO CARD: Info e Lotação */}
+                                <div className="flex justify-between items-start">
+                                  <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className={`font-bold text-base ${selecionado ? "text-white" : "text-slate-200"}`}>{t.dia_semana}</span>
+                                      <span className={selecionado ? "text-orange-400 font-bold text-base" : "text-slate-400 font-bold text-base"}>{t.horario.substring(0,5)}</span>
+                                    </div>
+                                    <div className={`text-[10px] font-bold uppercase tracking-wider ${selecionado ? "text-orange-500/80" : "text-slate-500"}`}>{t.nivel}</div>
                                   </div>
-                                  <div className="text-[11px] uppercase tracking-wider">{t.nivel}</div>
+
+                                  <div className="flex flex-col items-end gap-2">
+                                    {/* Ícone de check ou status */}
+                                    {selecionado ? (
+                                      <CheckCircle2 className="w-6 h-6 text-orange-500" />
+                                    ) : disabled ? (
+                                      <span className="text-[10px] font-bold text-red-500 uppercase">Lotada</span>
+                                    ) : (
+                                      <div className="w-6 h-6 rounded-full border-2 border-slate-700"></div>
+                                    )}
+                                    
+                                    {/* Etiqueta de vagas */}
+                                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider mt-1 ${
+                                      estaCheia ? "bg-red-500/10 text-red-500" :
+                                      selecionado ? "bg-orange-500/20 text-orange-500" : "bg-slate-800 text-slate-400"
+                                    }`}>
+                                      {lotacao} / {t.vagas_totais} vagas
+                                    </span>
+                                  </div>
                                 </div>
-                                {selecionado && <CheckCircle2 className="w-5 h-5 flex-shrink-0" />}
+
+                                {/* LISTA DE AVATARES DOS ALUNOS */}
+                                <div className="border-t border-slate-800/50 pt-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase shrink-0">Alunos na turma:</span>
+                                    <div className="flex flex-wrap gap-1.5 flex-1">
+                                      {t.matriculas && t.matriculas.length > 0 ? (
+                                        t.matriculas.map((mat: Matricula, idx: number) => {
+                                          const nomeCompleto = mat.perfis?.nome || "Aluno";
+                                          const primeiroNome = nomeCompleto.split(" ")[0];
+                                          const isExp = mat.status === 'experimental';
+                                          const isCurrentStudent = mat.perfis?.id === dadosEfetivacao.perfilId;
+
+                                          return (
+                                            <div
+                                              key={idx}
+                                              title={`${nomeCompleto} ${isExp ? '(Experimental)' : ''}`}
+                                              className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold cursor-help ring-2 ring-slate-950 ${
+                                                isCurrentStudent ? 'bg-emerald-500 text-slate-950 ring-emerald-500/30' :
+                                                isExp ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-slate-800 text-slate-300'
+                                              }`}
+                                            >
+                                              {primeiroNome.charAt(0).toUpperCase()}
+                                            </div>
+                                          );
+                                        })
+                                      ) : (
+                                        <span className="text-xs text-slate-600 font-medium">Turma vazia</span>
+                                      )}
+
+                                      {/* PREVIEW: Mostra um avatar "+1" fantasma se a turma for selecionada e o aluno ainda não estiver nela */}
+                                      {selecionado && !alunoJaNaTurma && (
+                                         <div 
+                                            className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ring-2 ring-slate-950 bg-orange-500 text-slate-950 border border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.4)] animate-pulse" 
+                                            title="Novo Aluno (Preview)"
+                                         >
+                                           +1
+                                         </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             )
                           })
