@@ -9,7 +9,7 @@ import {
   CalendarDays, Bell, ChevronLeft 
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { User } from "@supabase/supabase-js"; // Importa o tipo oficial do Supabase
+import type { User, Session } from "@supabase/supabase-js"; // Importa o tipo oficial do Supabase
 import { Perfil } from "@/types"; // Importa a sua interface de perfil
 
 
@@ -27,7 +27,7 @@ export function Navbar() {
 
   useEffect(() => {
     // Transformamos a busca de dados numa função que recebe a sessão atual
-    async function atualizarEstado(session: any) {
+    async function atualizarEstado(session: Session | null) {
       if (session) {
         setUsuarioLogado(session.user);
 

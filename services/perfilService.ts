@@ -17,21 +17,38 @@ export async function buscarPerfilUsuario(): Promise<Perfil | null> {
 }
 
 export async function atualizarPerfilUsuario(perfil: Perfil) {
-  // 1. Atualiza os dados básicos (limpando máscaras)
+
+  const cpfLimpo = perfil.cpf?.replace(/\D/g, "");
+
+
+  if (cpfLimpo) {
+    const { data: cpfExistente } = await supabase
+      .from('perfis')
+      .select('id')
+      .eq('cpf', cpfLimpo)
+      .neq('id', perfil.id) // Ignora o próprio utilizador (para ele poder salvar o próprio perfil sem dar erro)
+      .maybeSingle(); // maybeSingle retorna os dados se achar, ou null se não achar (sem dar erro)
+
+    // Se encontrou alguém com esse CPF que não seja o utilizador atual, bloqueia!
+    if (cpfExistente) {
+      throw new Error("Este CPF já está cadastrado em outra conta.");
+    }
+  }
+
+
   const { error: erroPerfil } = await supabase
     .from('perfis')
     .update({
       nome: perfil.nome,
       whatsapp: perfil.whatsapp.replace(/\D/g, ""),
       contato_emergencia: perfil.contato_emergencia?.replace(/\D/g, ""),
-      cpf: perfil.cpf?.replace(/\D/g, ""),
+      cpf: cpfLimpo,
       data_nascimento: perfil.data_nascimento || null
     })
     .eq('id', perfil.id);
 
   if (erroPerfil) throw new Error(erroPerfil.message);
 
-  // 2. Máquina de Estados: Se o cadastro estiver completo, avança as matrículas travadas
   const cadastroCompleto = perfil.cpf && perfil.data_nascimento && perfil.contato_emergencia;
 
   if (cadastroCompleto) {

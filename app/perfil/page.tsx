@@ -13,6 +13,26 @@ import { buscarPerfilUsuario, atualizarPerfilUsuario } from "@/services/perfilSe
 const maskCPF = (v: string) => v.replace(/\D/g, "").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})/, "$1-$2").replace(/(-\d{2})\d+?$/, "$1");
 const maskPhone = (v: string) => v.replace(/\D/g, "").replace(/(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2").replace(/(-\d{4})\d+?$/, "$1");
 
+// ADICIONE ESTA FUNÇÃO AQUI:
+const validarCPF = (cpf: string) => {
+  cpf = cpf.replace(/[^\d]+/g, ''); // Tira pontos e traços
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false; // Bloqueia 11111111111, 00000000000, etc.
+  
+  let soma = 0, resto;
+  for (let i = 1; i <= 9; i++) soma += parseInt(cpf.substring(i - 1, i)) * (11 - i);
+  resto = (soma * 10) % 11;
+  if (resto === 10 || resto === 11) resto = 0;
+  if (resto !== parseInt(cpf.substring(9, 10))) return false;
+  
+  soma = 0;
+  for (let i = 1; i <= 10; i++) soma += parseInt(cpf.substring(i - 1, i)) * (12 - i);
+  resto = (soma * 10) % 11;
+  if (resto === 10 || resto === 11) resto = 0;
+  if (resto !== parseInt(cpf.substring(10, 11))) return false;
+  
+  return true;
+};
+
 export default function PerfilPage() {
   const router = useRouter();
   const [carregando, setCarregando] = useState(true);
@@ -49,6 +69,11 @@ export default function PerfilPage() {
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!perfil) return;
+
+    if (perfil.cpf && !validarCPF(perfil.cpf)) {
+      setMensagem({ tipo: "erro", texto: "O CPF informado é inválido. Verifique os números." });
+      return; 
+    }
 
     setSalvando(true);
     setMensagem({ tipo: "", texto: "" });
@@ -125,21 +150,48 @@ export default function PerfilPage() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
-              <input type="tel" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500" value={perfil.whatsapp} onChange={e => setPerfil({...perfil, whatsapp: maskPhone(e.target.value)})} />
+              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Número do WhatsApp</label>
+              <input 
+                type="tel" 
+                required 
+                placeholder="(00) 00000-0000"
+                minLength={14}
+                maxLength={15}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500" 
+                value={perfil.whatsapp} 
+                onChange={e => setPerfil({...perfil, whatsapp: maskPhone(e.target.value)})} 
+              />
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Emergência</label>
+              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Número de Emergência</label>
               <div className="relative">
                 <PhoneCall className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <input type="tel" required className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-10 pr-4 text-white outline-none focus:border-orange-500" value={perfil.contato_emergencia || ""} onChange={e => setPerfil({...perfil, contato_emergencia: maskPhone(e.target.value)})} />
+                <input 
+                  type="tel" 
+                  required 
+                  placeholder="(00) 00000-0000"
+                  minLength={14}
+                  maxLength={15}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3.5 pl-10 pr-4 text-white outline-none focus:border-orange-500" 
+                  value={perfil.contato_emergencia || ""} 
+                  onChange={e => setPerfil({...perfil, contato_emergencia: maskPhone(e.target.value)})} 
+                />
               </div>
             </div>
 
             <div>
               <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">CPF</label>
-              <input type="text" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500" value={perfil.cpf || ""} onChange={e => setPerfil({...perfil, cpf: maskCPF(e.target.value)})} />
+              <input 
+                type="text" 
+                required 
+                placeholder="000.000.000-00"
+                minLength={14}
+                maxLength={14}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500" 
+                value={perfil.cpf || ""} 
+                onChange={e => setPerfil({...perfil, cpf: maskCPF(e.target.value)})} 
+              />
             </div>
 
             <div>
