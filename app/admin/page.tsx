@@ -42,8 +42,17 @@ export default function AdminDashboard() {
   const [professores, setProfessores] = useState<Perfil[]>([]); // Lista de professores
   
 
+  // Adicione o modal de sucesso junto do modal de confirmação
+  const [modalSucesso, setModalSucesso] = useState({ aberto: false, titulo: "", mensagem: "" });
+  
+  // Atualize o tipoModal para aceitar "editar_professor"
+  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno" | "professor" | "editar_professor">("turma");
+  
+  // Novo estado para guardar o ID do professor que está a ser editado
+  const [idEdicaoProfessor, setIdEdicaoProfessor] = useState<string | null>(null);
+
   // Adicione 'professor' no tipoModal
-  const [tipoModal, setTipoModal] = useState<"turma" | "quadra" | "editar_turma" | "efetivar_aluno" | "ver_aluno" | "editar_aluno" | "professor">("turma");
+  
   const [novoProfessor, setNovoProfessor] = useState({ nome: "", email: "", whatsapp: "", senha: "" });
 
   const [erroModal, setErroModal] = useState("");
@@ -78,6 +87,18 @@ export default function AdminDashboard() {
       setMatriculas(dados.matriculas as Matricula[]);
       setProfessores(dados.professores); // Salva a lista de professores
     } catch (error) { console.error("Erro ao buscar:", error); }
+  };
+
+  const abrirModalEdicaoProfessor = (prof: Perfil) => {
+    setNovoProfessor({ 
+      nome: prof.nome, 
+      email: prof.email, 
+      whatsapp: prof.whatsapp || "", 
+      senha: "" // A senha não é carregada (e será ocultada no formulário de edição)
+    });
+    setIdEdicaoProfessor(prof.id);
+    setTipoModal("editar_professor");
+    setModalAberto(true);
   };
 
   const abrirEdicaoNivel = (matricula: Matricula) => {
@@ -151,9 +172,15 @@ export default function AdminDashboard() {
         await efetivarMatricula(alunoSelecionado.id);
       }
       else if (tipoModal === "professor") {
-      
         await cadastrarNovoProfessor(novoProfessor);
-        alert("Professor cadastrado com sucesso!");
+        setModalSucesso({ aberto: true, titulo: "Professor Cadastrado", mensagem: "O novo professor já tem acesso ao sistema." });
+      }
+      else if (tipoModal === "editar_professor" && idEdicaoProfessor) {
+        await atualizarPerfil(idEdicaoProfessor, { 
+          nome: novoProfessor.nome, 
+          whatsapp: novoProfessor.whatsapp.replace(/\D/g, "") 
+        });
+        setModalSucesso({ aberto: true, titulo: "Professor Atualizado", mensagem: "Os dados foram salvos com sucesso." });
       }
       
       setModalAberto(false);
@@ -179,15 +206,37 @@ export default function AdminDashboard() {
   };
   
   const excluirItem = async (id: number, tabela: 'turmas' | 'horarios_quadra' | 'matriculas') => {
-    if (confirm("Tem a certeza que deseja excluir este registo?")) {
-      try {
-        await excluirRegistro(tabela, id);
-        buscarDados(); // Recarrega a lista
-      } catch (error) {
-        console.error(error); 
-        alert("Erro ao excluir.");
+    const isTurma = tabela === 'turmas';
+    const titulo = isTurma ? "Excluir Turma" : "Excluir Horário de Quadra";
+    const mensagem = isTurma 
+      ? "Tem a certeza que deseja excluir esta turma? Todos os alunos matriculados ficarão sem turma."
+      : "Tem a certeza que deseja excluir este horário de locação?";
+
+    setModalConfirmacao({
+      aberto: true,
+      titulo: titulo,
+      mensagem: mensagem,
+      acao: async () => {
+        setModalConfirmacao(prev => ({ ...prev, aberto: false }));
+        setCarregando(true);
+        try {
+          await excluirRegistro(tabela, id);
+          await buscarDados(); 
+          setModalSucesso({ 
+            aberto: true, 
+            titulo: "Excluído!", 
+            mensagem: isTurma ? "A turma foi removida do sistema com sucesso." : "O horário foi removido com sucesso." 
+          });
+        } catch (error) {
+          console.error(error); 
+          // Verificação segura de tipo sem usar 'any'
+          const mensagemErro = error instanceof Error ? error.message : "Erro ao excluir registo.";
+          setErroModal(mensagemErro);
+        } finally {
+          setCarregando(false);
+        }
       }
-    }
+    });
   };
 
   const abrirModal = (tipo: "turma" | "quadra") => {
@@ -286,32 +335,43 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 )}
-                {tipoModal === "professor" && (
+                {(tipoModal === "professor" || tipoModal === "editar_professor") && (
                   <div className="space-y-4">
                     <div>
                       <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nome Completo</label>
                       <input type="text" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.nome} onChange={e => setNovoProfessor({...novoProfessor, nome: e.target.value})} />
                     </div>
+                    
+                    {/* E-mail: Só permite digitar se estiver CRIANDO um professor */}
                     <div>
                       <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">E-mail</label>
-                      <input type="email" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.email} onChange={e => setNovoProfessor({...novoProfessor, email: e.target.value})} />
+                      <input 
+                        type="email" required 
+                        disabled={tipoModal === "editar_professor"} // Desabilita na edição
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm disabled:opacity-50 disabled:cursor-not-allowed" 
+                        value={novoProfessor.email} 
+                        onChange={e => setNovoProfessor({...novoProfessor, email: e.target.value})} 
+                      />
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+
+                    <div className={`grid ${tipoModal === "professor" ? "grid-cols-2" : "grid-cols-1"} gap-3`}>
                       <div>
                         <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">WhatsApp</label>
                         <input 
-                          type="tel" 
-                          required 
-                          placeholder="(00) 00000-0000" 
+                          type="tel" required placeholder="(00) 00000-0000" 
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" 
                           value={novoProfessor.whatsapp} 
                           onChange={e => setNovoProfessor({...novoProfessor, whatsapp: maskPhone(e.target.value)})} 
                         />
                       </div>
-                      <div>
-                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Senha Provisória</label>
-                        <input type="password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.senha} onChange={e => setNovoProfessor({...novoProfessor, senha: e.target.value})} />
-                      </div>
+                      
+                      {/* Senha: Só aparece ao CRIAR um professor */}
+                      {tipoModal === "professor" && (
+                        <div>
+                          <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Senha Provisória</label>
+                          <input type="password" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm" value={novoProfessor.senha} onChange={e => setNovoProfessor({...novoProfessor, senha: e.target.value})} />
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -766,13 +826,39 @@ export default function AdminDashboard() {
                           <p className="text-xs text-slate-400 mt-0.5">{prof.email}</p>
                         </div>
                       </div>
-                      <div className="flex justify-end sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex justify-end gap-2 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Botão de Editar */}
                         <button 
-                          onClick={async () => { 
-                            if(confirm("Deseja EXCLUIR DEFINITIVAMENTE este professor? O acesso dele será permanentemente revogado.")) { 
-                              await excluirProfessor(prof.id); 
-                              buscarDados(); 
-                            } 
+                          onClick={() => abrirModalEdicaoProfessor(prof)} 
+                          title="Editar Professor" 
+                          className="p-2.5 text-slate-400 bg-slate-800 hover:text-white rounded-xl transition-all"
+                        >
+                          <Edit2 className="w-5 h-5" />
+                        </button>
+                        
+                        {/* Botão de Excluir */}
+                        <button 
+                          onClick={() => {
+                            setModalConfirmacao({
+                              aberto: true,
+                              titulo: "Excluir Professor",
+                              mensagem: "Deseja EXCLUIR DEFINITIVAMENTE este professor? O acesso dele será permanentemente revogado e ele perderá o vínculo com as turmas.",
+                              acao: async () => {
+                                setModalConfirmacao(prev => ({ ...prev, aberto: false }));
+                                setCarregando(true);
+                                try {
+                                  await excluirProfessor(prof.id); 
+                                  await buscarDados();
+                                  setModalSucesso({ aberto: true, titulo: "Professor Removido", mensagem: "O acesso deste professor foi revogado com sucesso." });
+                                } catch (error) {
+                                  // Verificação segura de tipo sem usar 'any'
+                                  const mensagemErro = error instanceof Error ? error.message : "Erro ao excluir professor.";
+                                  setErroModal(mensagemErro);
+                                } finally {
+                                  setCarregando(false);
+                                }
+                              }
+                            });
                           }} 
                           title="Excluir Professor Definitivamente" 
                           className="p-2.5 text-slate-400 bg-slate-800 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
@@ -825,6 +911,31 @@ export default function AdminDashboard() {
                     Sim, Remover
                   </button>
                 </div>
+              </motion.div>
+            </div>
+          )}
+          {modalSucesso.aberto && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
+                onClick={() => setModalSucesso({ ...modalSucesso, aberto: false })}
+                className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" 
+              />
+              <motion.div 
+                initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} 
+                className="bg-slate-900 border border-slate-800 p-8 rounded-[2rem] shadow-2xl w-full max-w-sm text-center relative z-10"
+              >
+                <div className="w-20 h-20 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <CheckCircle2 className="w-10 h-10" />
+                </div>
+                <h2 className="text-xl font-bold text-white mb-2">{modalSucesso.titulo}</h2>
+                <p className="text-sm text-slate-400 mb-8 leading-relaxed">{modalSucesso.mensagem}</p>
+                <button 
+                  onClick={() => setModalSucesso({ ...modalSucesso, aberto: false })} 
+                  className="w-full py-3.5 bg-emerald-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-emerald-600 transition-colors"
+                >
+                  Continuar
+                </button>
               </motion.div>
             </div>
           )}
