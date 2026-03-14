@@ -22,7 +22,11 @@ export async function buscarMinhaAgenda(): Promise<Matricula[]> {
         dia_semana, 
         horario, 
         nivel, 
-        professor,
+        professor_id,
+        professor:perfis!turmas_professor_id_fkey (
+          id,
+          nome
+        ),
         matriculas (
           perfis (
             nome

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ChevronLeft, Send, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { ChevronLeft, Send, Loader2, CheckCircle2, Eye, EyeOff, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -36,6 +36,7 @@ export default function AulaExperimentalPage() {
     nome: "",
     email: "",
     whatsapp: "",
+    data_nascimento: "",
     senha: "",
     confirmarSenha: "",
     horarios_preferencia: "",
@@ -98,6 +99,7 @@ export default function AulaExperimentalPage() {
         email: formData.email,
         tipo: 'aluno',
         nivel: formData.nivel_experiencia, // Salva o nível diretamente no perfil
+        data_nascimento: formData.data_nascimento,
         sexo: formData.sexo,
         necessidade_especial: formData.necessidade_especial,
         objetivo: formData.objetivo
@@ -116,7 +118,8 @@ export default function AulaExperimentalPage() {
           nome_aluno: formData.nome,
           telefone_aluno: formData.whatsapp,
           horarios_preferencia: formData.horarios_preferencia,
-          professor_id: formData.professor_id || null, // Nulo se for "Qualquer professor"
+          professor_preferido_id: formData.professor_id || null,
+          professor_responsavel_id: formData.professor_id || null,
           status: "pendente",
           nivel_experiencia: formData.nivel_experiencia
         },
@@ -212,39 +215,55 @@ export default function AulaExperimentalPage() {
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Data de Nascimento</label>
+              <input
+                type="date"
+                required
+                max={new Date().toISOString().split("T")[0]}
+                value={formData.data_nascimento}
+                onChange={(e) => setFormData({ ...formData, data_nascimento: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all [color-scheme:dark]"
+              />
+            </div>
+
             {/* Senhas */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <div className="relative">
+              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Senha</label>
-                <input 
-                  type={mostrarSenha ? "text" : "password"} required placeholder="Mínimo 6 caracteres"
-                  value={formData.senha}
-                  onChange={(e) => setFormData({...formData, senha: e.target.value})}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setMostrarSenha(!mostrarSenha)} 
-                  className="absolute right-4 top-9 text-slate-500 hover:text-slate-300"
-                >
-                  {mostrarSenha ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
+                <div className="relative">
+                  <input 
+                    type={mostrarSenha ? "text" : "password"} required placeholder="Mínimo 6 caracteres"
+                    value={formData.senha}
+                    onChange={(e) => setFormData({...formData, senha: e.target.value})}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-12 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setMostrarSenha(!mostrarSenha)} 
+                    className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center text-slate-500 hover:text-slate-300"
+                  >
+                    {mostrarSenha ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
-              <div className="relative">
+              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Confirmar Senha</label>
-                <input 
-                  type={mostrarConfirmarSenha ? "text" : "password"} required placeholder="Repita a senha"
-                  value={formData.confirmarSenha}
-                  onChange={(e) => setFormData({...formData, confirmarSenha: e.target.value})}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setMostrarConfirmarSenha(!mostrarConfirmarSenha)} 
-                  className="absolute right-4 top-9 text-slate-500 hover:text-slate-300"
-                >
-                  {mostrarConfirmarSenha ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
+                <div className="relative">
+                  <input 
+                    type={mostrarConfirmarSenha ? "text" : "password"} required placeholder="Repita a senha"
+                    value={formData.confirmarSenha}
+                    onChange={(e) => setFormData({...formData, confirmarSenha: e.target.value})}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-12 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setMostrarConfirmarSenha(!mostrarConfirmarSenha)} 
+                    className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center text-slate-500 hover:text-slate-300"
+                  >
+                    {mostrarConfirmarSenha ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -252,34 +271,40 @@ export default function AulaExperimentalPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Sexo</label>
-                <select 
-                  required
-                  value={formData.sexo}
-                  onChange={(e) => setFormData({...formData, sexo: e.target.value})}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all appearance-none"
-                >
-                  <option value="">Selecione...</option>
-                  <option value="Masculino">Masculino</option>
-                  <option value="Feminino">Feminino</option>
-                  <option value="Outros">Outros</option>
-                  <option value="Prefiro não informar">Prefiro não informar</option>
-                </select>
+                <div className="relative">
+                  <select 
+                    required
+                    value={formData.sexo}
+                    onChange={(e) => setFormData({...formData, sexo: e.target.value})}
+                    className="w-full appearance-none bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-11 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                  >
+                    <option value="">Selecione...</option>
+                    <option value="Masculino">Masculino</option>
+                    <option value="Feminino">Feminino</option>
+                    <option value="Outros">Outros</option>
+                    <option value="Prefiro não informar">Prefiro não informar</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Nível no Futevôlei</label>
-                <select 
-                  required
-                  value={formData.nivel_experiencia}
-                  onChange={(e) => setFormData({...formData, nivel_experiencia: e.target.value})}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all appearance-none"
-                >
-                  <option value="">Selecione o seu nível...</option>
-                  <option value="Aprendiz">Aprendiz</option>
-                  <option value="Iniciante">Iniciante</option>
-                  <option value="Intermediário">Intermediário</option>
-                  <option value="Avançado">Avançado</option>
-                </select>
+                <div className="relative">
+                  <select 
+                    required
+                    value={formData.nivel_experiencia}
+                    onChange={(e) => setFormData({...formData, nivel_experiencia: e.target.value})}
+                    className="w-full appearance-none bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-11 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                  >
+                    <option value="">Selecione o seu nível...</option>
+                    <option value="Aprendiz">Aprendiz</option>
+                    <option value="Iniciante">Iniciante</option>
+                    <option value="Intermediário">Intermediário</option>
+                    <option value="Avançado">Avançado</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
+                </div>
               </div>
             </div>
 
@@ -317,24 +342,32 @@ export default function AulaExperimentalPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Tem preferência por um professor?</label>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Quer ser atendido por um professor específico?</label>
               {carregando ? (
                 <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-500 flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" /> A carregar professores...
                 </div>
               ) : (
-                <select 
-                  value={formData.professor_id}
-                  onChange={(e) => setFormData({...formData, professor_id: e.target.value})}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all appearance-none"
-                >
-                  <option value="">Qualquer professor (Recomendado)</option>
-                  {professores.map((prof) => (
-                    <option key={prof.id} value={prof.id}>
-                      {prof.nome}
-                    </option>
-                  ))}
-                </select>
+                <>
+                <div className="relative">
+                  <select 
+                    value={formData.professor_id}
+                    onChange={(e) => setFormData({...formData, professor_id: e.target.value})}
+                    className="w-full appearance-none bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-11 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                  >
+                    <option value="">Qualquer professor</option>
+                    {professores.map((prof) => (
+                      <option key={prof.id} value={prof.id}>
+                        {prof.nome}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  Se escolher um professor, somente ele poderá atender sua aula experimental. Se deixar em branco, qualquer professor poderá assumir o atendimento.
+                </p>
+                </>
               )}
             </div>
 

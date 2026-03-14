@@ -7,7 +7,17 @@ export async function buscarTurmasComAlunos(): Promise<Turma[]> {
   const { data: turmasData, error } = await supabase
     .from('turmas')
     .select(`
-      *,
+      id,
+      dia_semana,
+      horario,
+      nivel,
+      professor_id,
+      professor:perfis!turmas_professor_id_fkey (
+        id,
+        nome
+      ),
+      vagas_totais,
+      ativa,
       matriculas (
         status,
         perfis ( nome )

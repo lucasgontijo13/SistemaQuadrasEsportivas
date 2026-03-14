@@ -77,7 +77,7 @@ export default function AgendaPage() {
                   </div>
                   <h3 className="text-2xl font-bold text-white mb-1">{aula.turmas?.nivel}</h3>
                   <p className="text-slate-400 flex items-center gap-2 mb-4">
-                    <UserCheck className="w-4 h-4" /> Professor {aula.turmas?.professor}
+                    <UserCheck className="w-4 h-4" /> Professor {aula.turmas?.professor?.nome || "A definir"}
                   </p>
 
                   <div className="pt-4 border-t border-slate-800/50">

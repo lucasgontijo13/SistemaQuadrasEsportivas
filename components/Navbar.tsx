@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation"; // Importados para navegação
 import { motion, AnimatePresence } from "framer-motion";
@@ -17,6 +17,8 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const isHome = pathname === "/";
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const notificacaoRef = useRef<HTMLDivElement | null>(null);
 
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [usuarioLogado, setUsuarioLogado] = useState<User | null>(null);
@@ -87,6 +89,28 @@ export function Navbar() {
     };
   }, []);
 
+  useEffect(() => {
+    const fecharAoClicarFora = (event: MouseEvent | TouchEvent) => {
+      const alvo = event.target as Node;
+
+      if (menuRef.current && !menuRef.current.contains(alvo)) {
+        setMenuAberto(false);
+      }
+
+      if (notificacaoRef.current && !notificacaoRef.current.contains(alvo)) {
+        setNotificacaoAberta(false);
+      }
+    };
+
+    document.addEventListener("mousedown", fecharAoClicarFora);
+    document.addEventListener("touchstart", fecharAoClicarFora);
+
+    return () => {
+      document.removeEventListener("mousedown", fecharAoClicarFora);
+      document.removeEventListener("touchstart", fecharAoClicarFora);
+    };
+  }, []);
+
   const fazerLogout = async () => {
     await supabase.auth.signOut();
     setUsuarioLogado(null);
@@ -125,7 +149,7 @@ export function Navbar() {
         </Link>
 
         {/* LADO DIREITO: Menu e Ações */}
-        <div className="flex-1 flex justify-end gap-4 items-center">
+        <div className="flex-1 flex justify-end gap-2 sm:gap-4 items-center">
           {carregando ? (
             <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
           ) : usuarioLogado && perfil ? (
@@ -133,17 +157,28 @@ export function Navbar() {
               {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
                 <Link 
                   href="/admin" 
-                  className="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-full text-sm font-bold text-slate-300 hover:text-white hover:border-slate-700 transition-all"
+                  onClick={() => {
+                    setMenuAberto(false);
+                    setNotificacaoAberta(false);
+                  }}
+                  className="flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 px-3 sm:px-4 py-2 rounded-full text-sm font-bold text-slate-300 hover:text-white hover:border-slate-700 transition-all min-w-10"
+                  aria-label="Painel Admin"
                 >
                   <ShieldCheck className="w-4 h-4 text-orange-500" />
-                  Painel Admin
+                  <span className="hidden sm:inline">Painel Admin</span>
                 </Link>
               )}
 
-              <div className="relative">
+              <div className="relative" ref={menuRef}>
                 <button 
-                  onClick={() => setMenuAberto(!menuAberto)}
-                  className="flex items-center gap-3 hover:bg-slate-900 p-1.5 pr-4 rounded-full border border-slate-800 transition-all"
+                  onClick={() => {
+                    setMenuAberto((prev) => {
+                      const proximo = !prev;
+                      if (proximo) setNotificacaoAberta(false);
+                      return proximo;
+                    });
+                  }}
+                  className="flex items-center gap-3 hover:bg-slate-900 p-1.5 pr-2 sm:pr-4 rounded-full border border-slate-800 transition-all"
                 >
                   <div className="w-9 h-9 bg-orange-500 text-slate-950 rounded-full flex items-center justify-center font-bold text-sm">
                     {perfil.nome.charAt(0)}
@@ -162,10 +197,10 @@ export function Navbar() {
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
                       className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-2"
                     >
-                      <Link href="/agenda" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
+                      <Link href="/agenda" onClick={() => setMenuAberto(false)} className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <CalendarDays className="w-4 h-4" /> Minha Agenda
                       </Link>
-                      <Link href="/perfil" className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
+                      <Link href="/perfil" onClick={() => setMenuAberto(false)} className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <UserIcon className="w-4 h-4" /> Meu Perfil
                       </Link>
                       <div className="h-px bg-slate-800 my-2"></div>
@@ -177,9 +212,15 @@ export function Navbar() {
                 </AnimatePresence>
               </div>
 
-              <div className="relative">
+              <div className="relative" ref={notificacaoRef}>
                 <button 
-                  onClick={() => setNotificacaoAberta(!notificacaoAberta)}
+                  onClick={() => {
+                    setNotificacaoAberta((prev) => {
+                      const proximo = !prev;
+                      if (proximo) setMenuAberto(false);
+                      return proximo;
+                    });
+                  }}
                   className="p-2 text-slate-400 hover:text-white transition-colors relative bg-slate-900/50 rounded-full border border-slate-800/50 hover:border-orange-500/50"
                 >
                   <Bell className="w-6 h-6" />

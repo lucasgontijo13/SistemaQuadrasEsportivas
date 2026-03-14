@@ -16,11 +16,17 @@ export interface Perfil {
   objetivo?: string;
 }
 
+export interface ProfessorResumo {
+  id: string;
+  nome: string;
+}
+
 export interface Matricula {
   id: number;
   perfil_id: string;
   turma_id: number;
-  status: 'experimental' | 'ativo' | 'inativo' | 'aguardando_dados' | 'aguardando_pagamento'; // Adicionado 'aguardando_pagamento'
+  status: 'experimental' | 'ativo' | 'inativo' | 'aguardando_dados' | 'aguardando_pagamento' | 'pendente';
+  data_inicio?: string | null;
   perfis?: Perfil; 
   turmas?: Turma; 
 }
@@ -30,9 +36,20 @@ export interface Turma {
   dia_semana: string;
   horario: string;
   nivel: string;
-  professor: string;
+  professor_id: string | null;
+  professor?: ProfessorResumo | null;
+  professor_legado?: string | null;
   vagas_totais: number;
+  ativa?: boolean;
   matriculas?: Matricula[];
+}
+
+export interface DadosTurma {
+  dia_semana: string;
+  horario: string;
+  nivel: string;
+  professor_id: string;
+  vagas_totais: number;
 }
 
 export interface DadosAgendamento {
@@ -105,8 +122,30 @@ export interface SolicitacaoAula {
   created_at: string;
   nome_aluno: string;
   telefone_aluno: string;
+  data_nascimento?: string | null;
   horarios_preferencia: string;
-  professor_id: string | null;
-  status: 'pendente' | 'em_contato' | 'agendado';
+  professor_preferido_id: string | null;
+  professor_responsavel_id: string | null;
+  professor_origem_transferencia_id?: string | null;
+  turma_sugerida_id?: number | null;
+  ultima_recusa_repasse_por_id?: string | null;
+  ultima_recusa_repasse_observacao?: string | null;
+  ultima_recusa_repasse_em?: string | null;
+  data_aula_experimental?: string | null;
+  professor_preferido?: ProfessorResumo | null;
+  professor_responsavel?: ProfessorResumo | null;
+  professor_origem_transferencia?: ProfessorResumo | null;
+  ultima_recusa_repasse_por?: ProfessorResumo | null;
+  status:
+    | 'pendente'
+    | 'aguardando_aceite_professor'
+    | 'em_contato'
+    | 'agendado'
+    | 'aprovada_para_matricula'
+    | 'faltou'
+    | 'nao_vai_continuar'
+    | 'matricula_em_andamento';
   nivel_experiencia?: string;
+  ultimo_contato_whatsapp_em?: string | null;
+  resultado_experimental_em?: string | null;
 }
