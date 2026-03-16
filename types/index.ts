@@ -5,6 +5,7 @@ export interface Perfil {
   whatsapp: string;
   tipo: 'aluno' | 'professor' | 'admin';
   nivel?: string;
+  permitir_nova_experimental?: boolean;
   cpf?: string;
   data_nascimento?: string;
   contato_emergencia?: string;
@@ -87,6 +88,7 @@ export interface Perfil {
   whatsapp: string;
   tipo: 'aluno' | 'professor' | 'admin';
   nivel?: string;
+  permitir_nova_experimental?: boolean;
   cpf?: string;
   data_nascimento?: string;
   contato_emergencia?: string;

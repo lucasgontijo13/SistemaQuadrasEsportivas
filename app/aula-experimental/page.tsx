@@ -12,6 +12,24 @@ interface Professor {
   nome: string;
 }
 
+const STATUS_SOLICITACOES_EM_ANDAMENTO = [
+  "pendente",
+  "aguardando_aceite_professor",
+  "em_contato",
+  "agendado",
+  "faltou",
+  "aprovada_para_matricula",
+  "matricula_em_andamento",
+];
+
+const STATUS_MATRICULAS_BLOQUEANTES = [
+  "experimental",
+  "pendente",
+  "ativo",
+  "aguardando_dados",
+  "aguardando_pagamento",
+];
+
 const maskPhone = (value: string) => {
   if (!value) return "";
   return value
@@ -65,73 +83,167 @@ export default function AulaExperimentalPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (formData.senha !== formData.confirmarSenha) {
-      alert("As senhas não coincidem!");
-      return;
-    }
-
-    if (formData.senha.length < 6) {
-      alert("A senha deve ter pelo menos 6 caracteres.");
-      return;
-    }
 
     setEnviando(true);
 
-    // 1. Cria a conta do aluno na plataforma (Auth)
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.senha,
-    });
+    try {
+      const whatsappLimpo = formData.whatsapp.replace(/\D/g, "");
 
-    if (authError) {
-      alert("Erro ao criar conta: " + authError.message);
-      setEnviando(false);
-      return;
-    }
+      const [{ data: perfilPorEmail, error: erroPerfilEmail }, { data: perfilPorWhatsapp, error: erroPerfilWhatsapp }] =
+        await Promise.all([
+          supabase
+            .from("perfis")
+            .select("id, tipo, whatsapp, email, permitir_nova_experimental")
+            .eq("email", formData.email)
+            .maybeSingle(),
+          supabase
+            .from("perfis")
+            .select("id, tipo, whatsapp, email, permitir_nova_experimental")
+            .eq("whatsapp", whatsappLimpo)
+            .maybeSingle(),
+        ]);
 
-    // 2. Salva os dados na tabela de Perfis do banco de dados
-    if (authData.user) {
-      const { error: perfilError } = await supabase.from('perfis').insert([{
-        id: authData.user.id,
-        nome: formData.nome,
-        whatsapp: formData.whatsapp.replace(/\D/g, ""), 
-        email: formData.email,
-        tipo: 'aluno',
-        nivel: formData.nivel_experiencia, // Salva o nível diretamente no perfil
-        data_nascimento: formData.data_nascimento,
-        sexo: formData.sexo,
-        necessidade_especial: formData.necessidade_especial,
-        objetivo: formData.objetivo
-      }]);
-
-      if (perfilError) {
-        console.error("Erro ao salvar perfil:", perfilError);
+      if (erroPerfilEmail || erroPerfilWhatsapp) {
+        throw new Error("Não foi possível validar o seu cadastro agora. Tente novamente em instantes.");
       }
-    }
 
-    // 3. Salva a solicitação da aula experimental
-    const { error: solicitacaoError } = await supabase
-      .from("solicitacoes_aula_experimental")
-      .insert([
-        {
-          nome_aluno: formData.nome,
-          telefone_aluno: formData.whatsapp,
-          horarios_preferencia: formData.horarios_preferencia,
-          professor_preferido_id: formData.professor_id || null,
-          professor_responsavel_id: formData.professor_id || null,
-          status: "pendente",
-          nivel_experiencia: formData.nivel_experiencia
-        },
-      ]);
+      if (
+        perfilPorEmail &&
+        perfilPorWhatsapp &&
+        perfilPorEmail.id !== perfilPorWhatsapp.id
+      ) {
+        throw new Error("Este e-mail e este WhatsApp já estão vinculados a cadastros diferentes. Fale com a equipe para ajustar.");
+      }
 
-    setEnviando(false);
+      const perfilExistente = perfilPorEmail || perfilPorWhatsapp;
 
-    if (solicitacaoError) {
-      alert("A sua conta foi criada, mas ocorreu um erro ao registar a preferência de horário. Por favor, contacte o suporte.");
-      console.error(solicitacaoError);
-    } else {
+      if (!perfilExistente) {
+        if (!formData.senha || !formData.confirmarSenha) {
+          throw new Error("Crie uma senha para concluir o seu primeiro cadastro.");
+        }
+
+        if (formData.senha !== formData.confirmarSenha) {
+          throw new Error("As senhas não coincidem.");
+        }
+
+        if (formData.senha.length < 6) {
+          throw new Error("A senha deve ter pelo menos 6 caracteres.");
+        }
+      }
+
+      if (perfilExistente?.tipo && perfilExistente.tipo !== "aluno") {
+        throw new Error("Este contato já está vinculado a um perfil interno do sistema.");
+      }
+
+      const perfilId = perfilExistente?.id || null;
+      const whatsappReferencia = perfilExistente?.whatsapp || whatsappLimpo;
+
+      if (perfilId) {
+        const [{ data: solicitacaoEmAndamento, error: erroSolicitacaoAtiva }, { data: matriculaAtiva, error: erroMatriculaAtiva }] =
+          await Promise.all([
+            supabase
+              .from("solicitacoes_aula_experimental")
+              .select("id")
+              .in("status", STATUS_SOLICITACOES_EM_ANDAMENTO)
+              .in("telefone_aluno", [formData.whatsapp, whatsappReferencia])
+              .limit(1)
+              .maybeSingle(),
+            supabase
+              .from("matriculas")
+              .select("id")
+              .eq("perfil_id", perfilId)
+              .in("status", STATUS_MATRICULAS_BLOQUEANTES)
+              .limit(1)
+              .maybeSingle(),
+          ]);
+
+        if (erroSolicitacaoAtiva || erroMatriculaAtiva) {
+          throw new Error("Não foi possível validar o histórico desse aluno agora. Tente novamente em instantes.");
+        }
+
+        if (solicitacaoEmAndamento || matriculaAtiva) {
+          throw new Error("Já existe uma aula experimental ou matrícula em andamento para este aluno.");
+        }
+
+        if (perfilExistente.permitir_nova_experimental === false) {
+          throw new Error("Este aluno já utilizou a aula experimental. Apenas a equipe pode liberar uma nova tentativa.");
+        }
+
+        const { error: atualizarPerfilError } = await supabase
+          .from("perfis")
+          .update({
+            nome: formData.nome,
+            whatsapp: whatsappLimpo,
+            email: formData.email,
+            nivel: formData.nivel_experiencia,
+            data_nascimento: formData.data_nascimento,
+            sexo: formData.sexo,
+            necessidade_especial: formData.necessidade_especial,
+            objetivo: formData.objetivo,
+          })
+          .eq("id", perfilId);
+
+        if (atualizarPerfilError) {
+          throw new Error("Encontramos o cadastro do aluno, mas não conseguimos atualizar os dados agora.");
+        }
+      } else {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.senha,
+        });
+
+        if (authError) {
+          throw new Error(`Erro ao criar conta: ${authError.message}`);
+        }
+
+        if (!authData.user) {
+          throw new Error("Não foi possível concluir a criação da conta agora.");
+        }
+
+        const { error: perfilError } = await supabase.from("perfis").insert([
+          {
+            id: authData.user.id,
+            nome: formData.nome,
+            whatsapp: whatsappLimpo,
+            email: formData.email,
+            tipo: "aluno",
+            nivel: formData.nivel_experiencia,
+            data_nascimento: formData.data_nascimento,
+            sexo: formData.sexo,
+            necessidade_especial: formData.necessidade_especial,
+            objetivo: formData.objetivo,
+            permitir_nova_experimental: true,
+          },
+        ]);
+
+        if (perfilError) {
+          throw new Error("A conta foi criada, mas não conseguimos preparar o perfil do aluno.");
+        }
+      }
+
+      const { error: solicitacaoError } = await supabase
+        .from("solicitacoes_aula_experimental")
+        .insert([
+          {
+            nome_aluno: formData.nome,
+            telefone_aluno: formData.whatsapp,
+            horarios_preferencia: formData.horarios_preferencia,
+            professor_preferido_id: formData.professor_id || null,
+            professor_responsavel_id: formData.professor_id || null,
+            status: "pendente",
+            nivel_experiencia: formData.nivel_experiencia,
+          },
+        ]);
+
+      if (solicitacaoError) {
+        throw new Error("A solicitação não pôde ser registrada agora. Tente novamente em instantes.");
+      }
+
       setSucesso(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Não foi possível enviar a solicitação agora.");
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -148,7 +260,7 @@ export default function AulaExperimentalPage() {
           </div>
           <h2 className="text-2xl font-bold text-white mb-4">Solicitação Enviada!</h2>
           <p className="text-slate-400 mb-8 leading-relaxed">
-            A sua conta foi criada e recebemos as suas preferências. Um dos nossos professores entrará em contacto consigo pelo WhatsApp em breve para agendar a sua aula.
+            Recebemos as suas preferências e um dos nossos professores entrará em contacto pelo WhatsApp em breve para agendar a sua aula.
           </p>
           <Link href="/entrar">
             <button className="w-full bg-slate-800 text-white font-bold py-3.5 rounded-full hover:bg-slate-700 transition-colors">
@@ -233,7 +345,7 @@ export default function AulaExperimentalPage() {
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Senha</label>
                 <div className="relative">
                   <input 
-                    type={mostrarSenha ? "text" : "password"} required placeholder="Mínimo 6 caracteres"
+                    type={mostrarSenha ? "text" : "password"} placeholder="Mínimo 6 caracteres"
                     value={formData.senha}
                     onChange={(e) => setFormData({...formData, senha: e.target.value})}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-12 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
@@ -251,7 +363,7 @@ export default function AulaExperimentalPage() {
                 <label className="block text-sm font-medium text-slate-300 mb-1.5">Confirmar Senha</label>
                 <div className="relative">
                   <input 
-                    type={mostrarConfirmarSenha ? "text" : "password"} required placeholder="Repita a senha"
+                    type={mostrarConfirmarSenha ? "text" : "password"} placeholder="Repita a senha"
                     value={formData.confirmarSenha}
                     onChange={(e) => setFormData({...formData, confirmarSenha: e.target.value})}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 pr-12 text-white focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
@@ -266,6 +378,9 @@ export default function AulaExperimentalPage() {
                 </div>
               </div>
             </div>
+            <p className="text-xs text-slate-500 -mt-2">
+              Se este aluno já tiver cadastro e a equipe liberar uma nova experimental, a conta existente será reaproveitada.
+            </p>
 
             {/* NOVOS CAMPOS: Sexo e Nível */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
