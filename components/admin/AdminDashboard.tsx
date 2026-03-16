@@ -18,7 +18,7 @@ import {
   atualizarResponsavelSolicitacao, aceitarRepasseSolicitacao,
   recusarRepasseSolicitacao, repassarSolicitacaoParaProfessor,
   registrarTentativaContatoSolicitacao, agendarAulaExperimental,
-  registrarResultadoAulaExperimental
+  registrarResultadoAulaExperimental, aceitarMatriculaPendenteProfessor, recusarMatriculaPendenteProfessor
 } from "@/services/adminService";
 import { supabase } from "@/lib/supabase";
 
@@ -92,10 +92,12 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const [solicitacoes, setSolicitacoes] = useState<SolicitacaoAula[]>([]);
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
+  const [acessoVerificado, setAcessoVerificado] = useState(false);
   const [modalConfirmacao, setModalConfirmacao] = useState({ aberto: false, titulo: "", mensagem: "", acao: () => {} });
   const [alunosPerfis, setAlunosPerfis] = useState<Perfil[]>([]);
   const [matriculas, setMatriculas] = useState<Matricula[]>([]);
   const [turmas, setTurmas] = useState<Turma[]>([]);
+  const [turmasParaFluxos, setTurmasParaFluxos] = useState<Turma[]>([]);
   const [horariosQuadra, setHorariosQuadra] = useState<HorarioQuadra[]>([]);
   const [carregando, setCarregando] = useState(true);
 
@@ -172,7 +174,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     nivel: string;
     turmasIds: number[];
     cadastroCompleto: boolean;
-    datasInicioPorTurma: Record<number, string>;
+    dataInicioPlano: string;
     solicitacaoId: string | null;
   }>({ 
     matriculaId: 0,
@@ -181,7 +183,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     nivel: "Iniciante",
     turmasIds: [],
     cadastroCompleto: false,
-    datasInicioPorTurma: {},
+    dataInicioPlano: "",
     solicitacaoId: null,
   });
   
@@ -201,6 +203,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const obterNomeProfessorTurma = (turma?: Turma | null) =>
     turma?.professor?.nome || turma?.professor_legado || "Professor(a) não definido";
 
+  const obterTurmasFluxo = () => (turmasParaFluxos.length > 0 ? turmasParaFluxos : turmas);
+
   const matriculaEhFluxoExperimental = (
     matricula?: Matricula | null,
     solicitacao?: SolicitacaoAula | null
@@ -211,8 +215,22 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         !!solicitacao &&
         statusSolicitacoesExperimentaisAtivas.includes(solicitacao.status)));
 
+  const matriculaAguardandoAceiteProfessor = (matricula?: Matricula | null) =>
+    matricula?.status === "aguardando_aceite_professor";
+
+  const obterLabelStatusMatricula = (matricula?: Matricula | null) => {
+    if (!matricula) return "Sem status";
+    if (matricula.status === "ativo") return "Ativa";
+    if (matricula.status === "experimental") return "Experimental";
+    if (matricula.status === "inativo") return "Inativa";
+    if (matricula.status === "aguardando_pagamento") return "Aguardando pagto";
+    if (matricula.status === "aguardando_dados") return "Aguardando dados";
+    if (matricula.status === "aguardando_aceite_professor") return "Aguardando aceite";
+    return "Pendente";
+  };
+
   const obterResumoTurma = (turmaId?: number | null) => {
-    const turma = turmas.find((item) => item.id === turmaId);
+    const turma = obterTurmasFluxo().find((item) => item.id === turmaId) || turmas.find((item) => item.id === turmaId);
     if (!turma) return "Nenhuma sugestão registrada";
 
     return `${turma.dia_semana} às ${turma.horario.substring(0, 5)} • ${obterNomeProfessorTurma(turma)}`;
@@ -359,7 +377,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       return "O aluno faltou na aula experimental. Você pode reagendar uma nova tentativa ou encerrar o fluxo.";
     }
     if (solicitacao.status === "aprovada_para_matricula") {
-      return "O aluno quer continuar. Defina agora as turmas reais e a data de inicio de cada uma.";
+      return "O aluno quer continuar. Defina agora as turmas reais e a data de inicio do plano.";
     }
     if (solicitacao.status === "nao_vai_continuar") {
       return "O fluxo experimental foi encerrado para este aluno.";
@@ -387,8 +405,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     return "Atendimento em andamento. Se não houver encaixe, você pode transferir para outro professor.";
   };
 
-  const obterTurmasDisponiveis = () => {
-    return turmas
+  const obterTurmasDisponiveisNaColecao = (listaTurmas: Turma[]) => {
+    return listaTurmas
       .filter((turma) => {
         return turma.ativa !== false && contarOcupacaoTurma(turma) < turma.vagas_totais;
       })
@@ -403,6 +421,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         return a.horario.localeCompare(b.horario);
       });
   };
+
+  const obterTurmasDisponiveis = () => obterTurmasDisponiveisNaColecao(obterTurmasFluxo());
 
   const obterTurmasDisponiveisPorProfessor = (professorId?: string | null) =>
     obterTurmasDisponiveis().filter((turma) => turma.professor_id === professorId);
@@ -433,6 +453,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     try {
       const dados = await buscarDadosPainel(perfilTipo, perfilId);
       setTurmas(dados.turmas);
+      setTurmasParaFluxos(dados.turmasParaFluxos || dados.turmas);
       setHorariosQuadra(dados.horariosQuadra);
       setAlunosPerfis((dados.alunos as Perfil[]) || []);
       setMatriculas(dados.matriculas as Matricula[]);
@@ -551,64 +572,59 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
   useEffect(() => {
     async function verificarAcesso() {
-      // Pega a sessão para sabermos o ID do professor logado
-      const { data: { session } } = await supabase.auth.getSession();
-      const { autorizado, tipo } = await verificarPermissaoAdmin(); 
-      
-      if (!autorizado || !session) {
-        router.push("/");
-        return;
+      try {
+        // Pega a sessão para sabermos o ID do professor logado
+        const { data: { session } } = await supabase.auth.getSession();
+        const { autorizado, tipo } = await verificarPermissaoAdmin(); 
+        
+        if (!autorizado || !session) {
+          router.push("/");
+          return;
+        }
+
+        setUsuarioLogadoId(session.user.id);
+        setTipoLogado(tipo);
+
+        setAutorizado(true);
+        
+        // Busca as turmas, quadras e alunos matriculados
+        const dados = await buscarDadosPainel(tipo, session.user.id);
+        setTurmas(dados.turmas);
+        setTurmasParaFluxos(dados.turmasParaFluxos || dados.turmas);
+        setHorariosQuadra(dados.horariosQuadra);
+        setAlunosPerfis((dados.alunos as Perfil[]) || []);
+        setMatriculas(dados.matriculas as Matricula[]);
+        setProfessores(dados.professores);
+
+        // Busca as solicitações de aula experimental pendentes
+        const pendentes = await buscarSolicitacoesPendentes(session.user.id, tipo);
+        setSolicitacoes(pendentes);
+      } catch (error) {
+        console.error("Erro ao carregar painel:", error);
+        setErroModal(error instanceof Error ? error.message : "Não foi possível carregar os dados do painel.");
+      } finally {
+        setAcessoVerificado(true);
+        setCarregando(false);
       }
-
-      setUsuarioLogadoId(session.user.id);
-      setTipoLogado(tipo);
-
-      setAutorizado(true);
-      
-      // Busca as turmas, quadras e alunos matriculados
-      const dados = await buscarDadosPainel(tipo, session.user.id);
-      setTurmas(dados.turmas);
-      setHorariosQuadra(dados.horariosQuadra);
-      setAlunosPerfis((dados.alunos as Perfil[]) || []);
-      setMatriculas(dados.matriculas as Matricula[]);
-      setProfessores(dados.professores);
-
-      // MÁGICA AQUI: Busca as solicitações de aula experimental pendentes!
-      const pendentes = await buscarSolicitacoesPendentes(session.user.id, tipo);
-      setSolicitacoes(pendentes);
-
-      setCarregando(false);
     }
     verificarAcesso();
   }, [router]);
 
   const toggleTurmaEfetivacao = (idTurma: number) => {
-    const turmaSelecionada = turmas.find((turma) => turma.id === idTurma) || null;
     setDadosEfetivacao(prev => {
       const jaSelecionado = prev.turmasIds.includes(idTurma);
-      const proximoMapa = { ...prev.datasInicioPorTurma };
-
-      if (jaSelecionado) {
-        delete proximoMapa[idTurma];
-      } else if (turmaSelecionada) {
-        proximoMapa[idTurma] = prev.datasInicioPorTurma[idTurma] || obterProximaDataDaTurma(turmaSelecionada);
-      }
 
       return {
         ...prev,
         turmasIds: jaSelecionado ? prev.turmasIds.filter(id => id !== idTurma) : [...prev.turmasIds, idTurma],
-        datasInicioPorTurma: proximoMapa,
       };
     });
   };
 
-  const atualizarDataInicioEfetivacao = (turmaId: number, dataInicio: string) => {
+  const atualizarDataInicioEfetivacao = (dataInicio: string) => {
     setDadosEfetivacao((prev) => ({
       ...prev,
-      datasInicioPorTurma: {
-        ...prev.datasInicioPorTurma,
-        [turmaId]: dataInicio,
-      },
+      dataInicioPlano: dataInicio,
     }));
   };
 
@@ -691,19 +707,24 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         await salvarQuadra(novoHorarioQuadra, idEdicao);
       } 
       else if (tipoModal === "efetivar_aluno") {
-        await efetivarMatricula({
+        const resultadoEfetivacao = await efetivarMatricula({
           matriculaId: dadosEfetivacao.matriculaId,
           perfilId: dadosEfetivacao.perfilId,
           turmasIds: dadosEfetivacao.turmasIds,
           nivel: dadosEfetivacao.nivel,
           cadastroCompleto: dadosEfetivacao.cadastroCompleto,
-          datasInicioPorTurma: dadosEfetivacao.datasInicioPorTurma,
+          dataInicioPlano: dadosEfetivacao.dataInicioPlano,
           solicitacaoId: dadosEfetivacao.solicitacaoId,
+          tipoPerfil: tipoLogado,
+          professorSolicitanteId: tipoLogado === "professor" ? usuarioLogadoId : null,
         });
         setModalSucesso({
           aberto: true,
-          titulo: "Matricula Iniciada",
-          mensagem: "As turmas reais e as datas de inicio do aluno foram salvas com sucesso.",
+          titulo: resultadoEfetivacao.totalMatriculasPendentes > 0 ? "Plano Enviado" : "Matricula Iniciada",
+          mensagem:
+            resultadoEfetivacao.totalMatriculasPendentes > 0
+              ? `${resultadoEfetivacao.totalMatriculasDiretas} turma(s) foram confirmadas e ${resultadoEfetivacao.totalMatriculasPendentes} ficaram aguardando aceite de outros professores.`
+              : "As turmas reais do aluno foram salvas com sucesso.",
         });
       }
       else if (tipoModal === "professor") {
@@ -921,7 +942,10 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       const p = matriculaExperimental.perfis;
       const isCompleto = p?.cpf && p?.data_nascimento && p?.contato_emergencia;
       const turmaInicial =
-        matriculaExperimental.turmas || turmas.find((turma) => turma.id === matriculaExperimental.turma_id) || null;
+        matriculaExperimental.turmas ||
+        obterTurmasFluxo().find((turma) => turma.id === matriculaExperimental.turma_id) ||
+        turmas.find((turma) => turma.id === matriculaExperimental.turma_id) ||
+        null;
       const dataInicial = matriculaExperimental.data_inicio || obterProximaDataDaTurma(turmaInicial);
 
       setDadosEfetivacao({
@@ -931,10 +955,10 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         nivel: p?.nivel || solicitacao.nivel_experiencia || "Iniciante",
         turmasIds: [matriculaExperimental.turma_id],
         cadastroCompleto: !!isCompleto,
-        datasInicioPorTurma: dataInicial ? { [matriculaExperimental.turma_id]: dataInicial } : {},
+        dataInicioPlano: dataInicial || "",
         solicitacaoId: solicitacao.id,
       });
-      setDiaFiltroModal(turmaInicial?.dia_semana || "Segunda");
+      setDiaFiltroModal(turmaInicial?.dia_semana || obterTurmasFluxo()[0]?.dia_semana || "Segunda");
       setTipoModal("efetivar_aluno");
       setModalAgendamentoAberto(false);
       setModalTransferenciaAberto(false);
@@ -1015,7 +1039,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         titulo: "Aula Marcada",
         mensagem: `${agendamento.nomeAluno} começa em ${formatarDataCurta(agendamento.dataInicio)}, ${agendamento.diaSemana}, às ${agendamento.horario.substring(0, 5)}.`,
       });
-      await buscarDados(tipo);
     } catch (error) {
       setErroModal(error instanceof Error ? error.message : "Não foi possível concluir o agendamento.");
     } finally {
@@ -1039,6 +1062,44 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       });
     } catch (error) {
       setErroModal(error instanceof Error ? error.message : "Não foi possível recusar o repasse.");
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  const aceitarMatriculaPendente = async (matricula: Matricula) => {
+    setCarregando(true);
+    setErroModal("");
+
+    try {
+      await aceitarMatriculaPendenteProfessor(matricula.id, usuarioLogadoId);
+      await recarregarPainel();
+      setModalSucesso({
+        aberto: true,
+        titulo: "Turma Confirmada",
+        mensagem: "A matrícula foi aceita e já entrou no plano do aluno.",
+      });
+    } catch (error) {
+      setErroModal(error instanceof Error ? error.message : "Não foi possível aceitar esta matrícula.");
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  const recusarMatriculaPendente = async (matricula: Matricula) => {
+    setCarregando(true);
+    setErroModal("");
+
+    try {
+      await recusarMatriculaPendenteProfessor(matricula.id, usuarioLogadoId);
+      await recarregarPainel();
+      setModalSucesso({
+        aberto: true,
+        titulo: "Turma Recusada",
+        mensagem: "Essa turma pendente foi recusada e saiu da sua fila.",
+      });
+    } catch (error) {
+      setErroModal(error instanceof Error ? error.message : "Não foi possível recusar esta matrícula.");
     } finally {
       setCarregando(false);
     }
@@ -1181,9 +1242,22 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       turmasIds: [],
       datasInicioPorTurma: {},
     });
+    setDadosEfetivacao({
+      matriculaId: 0,
+      perfilId: "",
+      nomeAluno: "",
+      nivel: "Iniciante",
+      turmasIds: [],
+      cadastroCompleto: false,
+      dataInicioPlano: "",
+      solicitacaoId: null,
+    });
   };
 
-  const turmasFiltradasNoModal = turmas.filter(t => t.dia_semana === diaFiltroModal);
+  const turmasDisponiveisEfetivacao = obterTurmasDisponiveisNaColecao(obterTurmasFluxo());
+  const turmasFiltradasNoModal = turmasDisponiveisEfetivacao.filter(
+    (turma) => turma.dia_semana === diaFiltroModal
+  );
   const solicitacaoExigeProfessorEscolhido = solicitacaoTemProfessorEscolhido(solicitacaoSelecionada);
   const solicitacaoAguardandoAceite =
     solicitacaoSelecionada?.status === "aguardando_aceite_professor";
@@ -1232,6 +1306,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const diasDisponiveisSolicitacao = diasDaSemanaModal.filter((dia) =>
     turmasDisponiveisSolicitacao.some((turma) => turma.dia_semana === dia)
   );
+  const diasDisponiveisEfetivacao = diasDaSemanaModal.filter((dia) =>
+    turmasDisponiveisEfetivacao.some((turma) => turma.dia_semana === dia)
+  );
   const turmasDoDiaSolicitacao = turmasDisponiveisSolicitacao.filter(
     (turma) => turma.dia_semana === diaAgendamentoSolicitacao
   );
@@ -1253,13 +1330,26 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const solicitacaoFaltou = solicitacaoSelecionada?.status === "faltou";
   const solicitacaoProntaParaMatricula =
     solicitacaoSelecionada?.status === "aprovada_para_matricula";
-  const turmasSelecionadasEfetivacao = turmas.filter((turma) =>
+  const turmasSelecionadasEfetivacao = obterTurmasFluxo().filter((turma) =>
     dadosEfetivacao.turmasIds.includes(turma.id)
   );
-  const datasEfetivacaoValidas = turmasSelecionadasEfetivacao.every((turma) => {
-    const dataInicio = dadosEfetivacao.datasInicioPorTurma[turma.id];
-    return !!dataInicio && dataCompativelComTurma(dataInicio, turma) && new Date(`${dataInicio}T12:00:00`) >= new Date(`${dataMinimaAgendamento}T00:00:00`);
-  });
+  const dataInicioPlanoValida =
+    !!dadosEfetivacao.dataInicioPlano &&
+    new Date(`${dadosEfetivacao.dataInicioPlano}T12:00:00`) >= new Date(`${dataMinimaAgendamento}T00:00:00`);
+  const turmasEfetivacaoDiretas = turmasSelecionadasEfetivacao.filter(
+    (turma) =>
+      tipoLogado === "admin" ||
+      !usuarioLogadoId ||
+      !turma.professor_id ||
+      turma.professor_id === usuarioLogadoId
+  );
+  const turmasEfetivacaoAguardandoAceite = turmasSelecionadasEfetivacao.filter(
+    (turma) =>
+      tipoLogado === "professor" &&
+      !!usuarioLogadoId &&
+      !!turma.professor_id &&
+      turma.professor_id !== usuarioLogadoId
+  );
   const aguardandoAceiteDoProfessor =
     solicitacaoAguardandoAceite &&
     solicitacaoSelecionada?.professor_responsavel_id === usuarioLogadoId;
@@ -1326,6 +1416,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const matriculasComContexto = matriculas.map((matricula) => {
     const solicitacaoRelacionada = obterSolicitacaoRelacionadaMatricula(matricula);
     const fluxoExperimental = matriculaEhFluxoExperimental(matricula, solicitacaoRelacionada);
+    const aceiteProfessorPendente = matriculaAguardandoAceiteProfessor(matricula);
     const experimentalAguardandoResultado =
       solicitacaoRelacionada?.status === "agendado" && dataJaChegou(solicitacaoRelacionada.data_aula_experimental);
     const experimentalAulaHoje =
@@ -1341,6 +1432,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       matricula,
       solicitacaoRelacionada,
       fluxoExperimental,
+      aceiteProfessorPendente,
       experimentalAguardandoResultado,
       experimentalAulaHoje,
       experimentalSemResultado,
@@ -1359,6 +1451,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     .map((perfil, indice) => {
       const contextosAluno = contextosPorPerfil.get(perfil.id) || [];
       const contextosExperimentais = contextosAluno.filter((item) => item.fluxoExperimental);
+      const matriculasPendentesAceite = contextosAluno.filter((item) => item.aceiteProfessorPendente);
       const contextoExperimentalAtual =
         contextosExperimentais.find((item) => item.experimentalSemResultado) ||
         contextosExperimentais.find((item) => item.experimentalProntoParaMatricula) ||
@@ -1366,11 +1459,15 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         contextosExperimentais[0] ||
         null;
       const matriculasAtivas = contextosAluno.filter(
-        (item) => !item.fluxoExperimental && item.matricula.status !== "inativo"
+        (item) =>
+          !item.fluxoExperimental &&
+          !item.aceiteProfessorPendente &&
+          item.matricula.status !== "inativo"
       );
       const matriculasInativas = contextosAluno.filter((item) => item.matricula.status === "inativo");
       const matriculaRepresentante =
         contextoExperimentalAtual?.matricula ||
+        matriculasPendentesAceite[0]?.matricula ||
         matriculasAtivas[0]?.matricula ||
         matriculasInativas[0]?.matricula || {
           id: -(indice + 1),
@@ -1394,18 +1491,19 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         matriculasInativas.length > 0
           ? `${matriculasInativas.length} histórico${matriculasInativas.length > 1 ? "s" : ""} encerrado${matriculasInativas.length > 1 ? "s" : ""}`
           : null;
+      const resumoAceitesPendentes =
+        matriculasPendentesAceite.length > 0
+          ? `${matriculasPendentesAceite.length} turma${matriculasPendentesAceite.length > 1 ? "s" : ""} aguardando aceite`
+          : null;
+      const resumoOperacional = [resumoTurmasAtivas, resumoAceitesPendentes, resumoTurmasInativas]
+        .filter(Boolean)
+        .join(" • ");
       const descricao =
         contextoExperimentalAtual?.solicitacaoRelacionada
           ? contextoExperimentalAtual.solicitacaoRelacionada.status === "agendado"
             ? `Experimental em ${formatarDataCurta(contextoExperimentalAtual.solicitacaoRelacionada.data_aula_experimental)}`
             : obterDescricaoStatusSolicitacao(contextoExperimentalAtual.solicitacaoRelacionada)
-          : resumoTurmasAtivas && resumoTurmasInativas
-            ? `${resumoTurmasAtivas} • ${resumoTurmasInativas}`
-            : resumoTurmasAtivas ||
-              resumoTurmasInativas ||
-              (perfil.permitir_nova_experimental === false
-                ? "Nova experimental bloqueada até liberação do admin."
-                : "Sem turmas ativas no momento.");
+          : resumoOperacional || "Sem turmas ativas no momento.";
       const professoresVinculadosMap = new Map<string, string>();
 
       contextosAluno.forEach(({ matricula }) => {
@@ -1425,20 +1523,25 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         matriculaRepresentante,
         contextoExperimentalAtual,
         matriculasAtivas,
+        matriculasPendentesAceite,
         matriculasInativas,
         horariosAtivos,
         professoresVinculadosIds: Array.from(professoresVinculadosMap.keys()),
         professoresVinculadosNomes: Array.from(professoresVinculadosMap.values()),
         possuiMatriculasAtivas: matriculasAtivas.length > 0,
+        possuiAceitesPendentes: matriculasPendentesAceite.length > 0,
         possuiFluxoExperimental: !!contextoExperimentalAtual,
         precisaAtencao:
+          matriculasPendentesAceite.length > 0 ||
           !!contextoExperimentalAtual?.experimentalSemResultado ||
           !!contextoExperimentalAtual?.experimentalProntoParaMatricula,
         labelStatus: contextoExperimentalAtual?.solicitacaoRelacionada
           ? obterLabelStatusSolicitacao(contextoExperimentalAtual.solicitacaoRelacionada)
+          : matriculasPendentesAceite.length > 0 && matriculasAtivas.length === 0
+            ? "Aguardando aceite"
           : matriculasAtivas.length > 0
             ? resumoTurmasAtivas || "Matriculado"
-            : matriculasInativas.length > 0
+          : matriculasInativas.length > 0
               ? "Inativo"
               : "Sem turma",
         descricao,
@@ -1460,19 +1563,23 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       return a.perfil.nome.localeCompare(b.perfil.nome);
     });
   const totalPerfisAlunos = alunosResumo.length;
-  const totalPerfisMatriculados = alunosResumo.filter((aluno) => aluno.possuiMatriculasAtivas).length;
+  const totalPerfisMatriculados = alunosResumo.filter(
+    (aluno) => aluno.possuiMatriculasAtivas || aluno.possuiAceitesPendentes
+  ).length;
   const totalPerfisExperimentais = alunosResumo.filter((aluno) => aluno.possuiFluxoExperimental).length;
   const totalPerfisInativos = alunosResumo.filter(
-    (aluno) => !aluno.possuiFluxoExperimental && !aluno.possuiMatriculasAtivas
+    (aluno) => !aluno.possuiFluxoExperimental && !aluno.possuiMatriculasAtivas && !aluno.possuiAceitesPendentes
   ).length;
   const buscaSolicitacoesNormalizada = buscaSolicitacoes.trim().toLowerCase();
   const buscaAlunosNormalizada = buscaAlunos.trim().toLowerCase();
   const buscaMatriculadosNormalizada = buscaMatriculados.trim().toLowerCase();
   const buscaTurmasNormalizada = buscaTurmas.trim().toLowerCase();
-  const alunosMatriculados = alunosResumo.filter((aluno) => aluno.possuiMatriculasAtivas);
+  const alunosMatriculados = alunosResumo.filter(
+    (aluno) => aluno.possuiMatriculasAtivas || aluno.possuiAceitesPendentes
+  );
   const alunosFiltrados = alunosResumo.filter((aluno) => {
     if (filtroCategoriaAlunos === "matriculados") {
-      if (!aluno.possuiMatriculasAtivas) return false;
+      if (!aluno.possuiMatriculasAtivas && !aluno.possuiAceitesPendentes) return false;
     }
 
     if (filtroCategoriaAlunos === "experimentais") {
@@ -1480,7 +1587,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     }
 
     if (filtroCategoriaAlunos === "inativos") {
-      if (aluno.possuiFluxoExperimental || aluno.possuiMatriculasAtivas) return false;
+      if (aluno.possuiFluxoExperimental || aluno.possuiMatriculasAtivas || aluno.possuiAceitesPendentes) return false;
     }
 
     if (
@@ -1569,10 +1676,23 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
           return (turmaA?.horario || "").localeCompare(turmaB?.horario || "");
         })
     : [];
+  const alunoSelecionadoTemTurmaRegularConfirmada = matriculasRelacionadasAlunoSelecionado.some((matricula) => {
+    const solicitacaoRelacionada = obterSolicitacaoRelacionadaMatricula(matricula);
+    return !matriculaEhFluxoExperimental(matricula, solicitacaoRelacionada) &&
+      !matriculaAguardandoAceiteProfessor(matricula) &&
+      matricula.status !== "inativo";
+  });
   const alunosMatriculadosFiltrados = alunosMatriculados.filter((aluno) => {
+    const horariosPendentesBusca = aluno.matriculasPendentesAceite
+      .map(({ matricula }) => {
+        const turma = matricula.turmas || turmas.find((item) => item.id === matricula.turma_id);
+        return turma ? `${turma.dia_semana} ${turma.horario}` : "";
+      })
+      .join(" ");
+
     if (
       buscaMatriculadosNormalizada &&
-      !`${aluno.perfil.nome} ${aluno.perfil.whatsapp} ${aluno.horariosAtivos.join(" ")}`.toLowerCase().includes(buscaMatriculadosNormalizada)
+      !`${aluno.perfil.nome} ${aluno.perfil.whatsapp} ${aluno.horariosAtivos.join(" ")} ${horariosPendentesBusca}`.toLowerCase().includes(buscaMatriculadosNormalizada)
     ) {
       return false;
     }
@@ -1580,7 +1700,10 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     if (
       tipoLogado === "admin" &&
       filtroProfessorMatriculados !== "todos" &&
-      !aluno.matriculasAtivas.some(({ matricula }) => matricula.turmas?.professor_id === filtroProfessorMatriculados)
+      ![...aluno.matriculasAtivas, ...aluno.matriculasPendentesAceite].some(({ matricula }) => {
+        const turma = matricula.turmas || turmas.find((item) => item.id === matricula.turma_id);
+        return turma?.professor_id === filtroProfessorMatriculados;
+      })
     ) {
       return false;
     }
@@ -1680,11 +1803,24 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     }
   }, [diaFiltroTurmas, diasComTurmaNoPainel]);
 
-  if (!autorizado) {
+  if (!acessoVerificado) {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
   }
+
+  if (!autorizado) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center px-6 text-center">
+        <div className="max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-6">
+          <p className="text-base font-bold text-white">Acesso não liberado</p>
+          <p className="mt-2 text-sm text-slate-400">
+            Não conseguimos validar o seu perfil para abrir este painel.
+          </p>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-24 relative">
+    <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pt-[calc(7rem+env(safe-area-inset-top))] sm:pt-0 pb-24 relative">
       
       <AnimatePresence>
         {modalAberto && (
@@ -1764,7 +1900,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    {alunoSelecionado.perfil_id && secaoAtiva === "matriculas" && (
+                    {alunoSelecionado.perfil_id && secaoAtiva === "matriculas" && alunoSelecionadoTemTurmaRegularConfirmada && (
                       <div>
                         <button
                           type="button"
@@ -1808,37 +1944,63 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                           <div className="space-y-2">
                             {matriculasRelacionadasAlunoSelecionado.map((matricula) => {
                               const turma = matricula.turmas || turmas.find((item) => item.id === matricula.turma_id);
-                              const labelStatus =
-                                matricula.status === "ativo"
-                                  ? "Ativa"
-                                  : matricula.status === "experimental"
-                                    ? "Experimental"
-                                    : matricula.status === "inativo"
-                                      ? "Inativa"
-                                      : matricula.status === "aguardando_pagamento"
-                                        ? "Aguardando pagto"
-                                        : matricula.status === "aguardando_dados"
-                                          ? "Aguardando dados"
-                                          : "Pendente";
+                              const labelStatus = obterLabelStatusMatricula(matricula);
+                              const podeResponderMatriculaPendente =
+                                tipoLogado === "professor" &&
+                                matricula.status === "aguardando_aceite_professor" &&
+                                turma?.professor_id === usuarioLogadoId;
+                              const professorDaTurma = turma ? obterNomeProfessorTurma(turma) : "";
+                              const professorIndicacao = buscarNomeProfessorPorId(matricula.professor_indicacao_id);
 
                               return (
                                 <div
                                   key={`modal-aluno-matricula-${matricula.id}`}
-                                  className="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2"
+                                  className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-3"
                                 >
-                                  <div className="min-w-0">
-                                    <p className="text-sm font-medium text-slate-200">
-                                      {turma ? `${turma.dia_semana} às ${turma.horario.substring(0, 5)}` : "Sem turma vinculada"}
-                                    </p>
-                                    {matricula.data_inicio && (
-                                      <p className="text-xs text-slate-500 mt-1">
-                                        Início em {formatarDataCurta(matricula.data_inicio)}
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-slate-200">
+                                        {turma ? `${turma.dia_semana} às ${turma.horario.substring(0, 5)}` : "Sem turma vinculada"}
                                       </p>
-                                    )}
+                                      {professorDaTurma && (
+                                        <p className="mt-1 text-xs text-slate-500">
+                                          Professor: {professorDaTurma}
+                                        </p>
+                                      )}
+                                      {matricula.data_inicio && (
+                                        <p className="text-xs text-slate-500 mt-1">
+                                          Início em {formatarDataCurta(matricula.data_inicio)}
+                                        </p>
+                                      )}
+                                      {matricula.status === "aguardando_aceite_professor" && professorIndicacao && (
+                                        <p className="text-xs text-amber-300 mt-1">
+                                          Indicado por {professorIndicacao}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <span className="w-fit whitespace-nowrap rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-bold uppercase text-slate-300">
+                                      {labelStatus}
+                                    </span>
                                   </div>
-                                  <span className="whitespace-nowrap rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[10px] font-bold uppercase text-slate-300">
-                                    {labelStatus}
-                                  </span>
+
+                                  {podeResponderMatriculaPendente && (
+                                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                      <button
+                                        type="button"
+                                        onClick={() => aceitarMatriculaPendente(matricula)}
+                                        className="flex-1 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-600"
+                                      >
+                                        Aceitar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => recusarMatriculaPendente(matricula)}
+                                        className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:border-red-500/40 hover:text-red-300"
+                                      >
+                                        Recusar
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -2114,7 +2276,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                           <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Pos-experimental</p>
                           <p className="text-sm text-slate-500 mt-1">
                             {solicitacaoProntaParaMatricula
-                              ? "O aluno quer continuar. Agora defina as turmas reais e o inicio de cada uma."
+                              ? "O aluno quer continuar. Agora defina as turmas reais e o início do plano."
                               : solicitacaoFaltou
                                 ? "O aluno faltou. Agora voce decide se reagenda a aula teste ou se encerra esse fluxo."
                               : "Registre o resultado da aula experimental para decidir o proximo passo do aluno."}
@@ -2146,7 +2308,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                             className="w-full flex items-center justify-center gap-2 bg-white text-slate-950 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <CheckCircle2 className="w-5 h-5" />
-                            Escolher Turmas Reais
+                            Marcar Aula
                           </button>
                         ) : solicitacaoFaltou ? (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2288,7 +2450,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       <div className="w-10 h-10 sm:w-12 sm:h-12 bg-orange-500 text-slate-950 rounded-full flex items-center justify-center font-bold text-lg sm:text-xl flex-shrink-0">{dadosEfetivacao.nomeAluno.charAt(0)}</div>
                       <div>
                         <h3 className="font-bold text-orange-400 text-sm sm:text-base leading-tight">{dadosEfetivacao.nomeAluno}</h3>
-                        <p className="text-xs sm:text-sm text-slate-400">Montagem das turmas reais</p>
+                        <p className="text-xs sm:text-sm text-slate-400">Marcação das aulas</p>
                       </div>
                     </div>
 
@@ -2301,7 +2463,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Turmas Definitivas</label>
+                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">Aulas do Plano</label>
                         <span className="text-xs font-bold bg-slate-800 text-orange-500 px-2 py-0.5 rounded-md">
                           {dadosEfetivacao.turmasIds.length} selec.
                         </span>
@@ -2310,9 +2472,11 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         Voce pode selecionar mais de uma turma no mesmo dia, se fizer sentido para a rotina do aluno.
                       </p>
                       
-                      <div className="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-hide -mx-2 px-2 sm:mx-0 sm:px-0">
-                        {diasDaSemanaModal.map(dia => {
-                          const temTurmaNesteDia = turmas.some(t => t.dia_semana === dia && dadosEfetivacao.turmasIds.includes(t.id));
+                        <div className="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-hide -mx-2 px-2 sm:mx-0 sm:px-0">
+                        {diasDisponiveisEfetivacao.map(dia => {
+                          const temTurmaNesteDia = turmasDisponiveisEfetivacao.some(
+                            (turma) => turma.dia_semana === dia && dadosEfetivacao.turmasIds.includes(turma.id)
+                          );
                           return (
                             <button
                               key={dia}
@@ -2364,6 +2528,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                       <span className={selecionado ? "text-orange-400 font-bold text-base" : "text-slate-400 font-bold text-base"}>{t.horario.substring(0,5)}</span>
                                     </div>
                                     <div className={`text-[10px] font-bold uppercase tracking-wider ${selecionado ? "text-orange-500/80" : "text-slate-500"}`}>{t.nivel}</div>
+                                    <p className={`mt-1 text-xs ${selecionado ? "text-slate-200" : "text-slate-400"}`}>
+                                      {obterNomeProfessorTurma(t)}
+                                    </p>
                                   </div>
 
                                   <div className="flex flex-col items-end gap-2">
@@ -2437,50 +2604,81 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                     {turmasSelecionadasEfetivacao.length > 0 && (
                       <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
                         <div>
-                          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Inicio das turmas</p>
+                          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Inicio do plano</p>
                           <p className="text-sm text-slate-500 mt-1">
-                            Defina em qual data o aluno comeca em cada turma selecionada.
+                            Escolha a data em que o plano do aluno começa. Essa mesma referência vale para as turmas selecionadas.
                           </p>
                         </div>
 
-                        <div className="space-y-3">
-                          {turmasSelecionadasEfetivacao.map((turma) => {
-                            const dataInicio = dadosEfetivacao.datasInicioPorTurma[turma.id] || "";
-                            const dataValida = !!dataInicio && dataCompativelComTurma(dataInicio, turma);
+                        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-bold text-white">
+                                Data de início do plano
+                              </p>
+                              <p className="text-xs text-slate-400 mt-1">
+                                Defina a partir de quando a mensalidade e o plano começam a contar.
+                              </p>
+                            </div>
+                            <span className="text-[11px] px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-300 font-bold uppercase tracking-wider">
+                              Sugestão: {formatarDataCurta(dadosEfetivacao.dataInicioPlano || dataMinimaAgendamento)}
+                            </span>
+                          </div>
 
-                            return (
-                              <div key={`inicio-${turma.id}`} className="rounded-xl border border-slate-800 bg-slate-900 p-3 space-y-3">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <p className="text-sm font-bold text-white">
-                                      {turma.dia_semana} as {turma.horario.substring(0, 5)}
-                                    </p>
-                                    <p className="text-xs text-slate-400 mt-1">
-                                      {turma.nivel} • {obterNomeProfessorTurma(turma)}
-                                    </p>
-                                  </div>
-                                  <span className="text-[11px] px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-300 font-bold uppercase tracking-wider">
-                                    Sugestao: {formatarDataCurta(obterProximaDataDaTurma(turma))}
-                                  </span>
-                                </div>
+                          <input
+                            type="date"
+                            min={dataMinimaAgendamento}
+                            value={dadosEfetivacao.dataInicioPlano}
+                            onChange={(e) => atualizarDataInicioEfetivacao(e.target.value)}
+                            style={{ colorScheme: "dark" }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm"
+                          />
 
-                                <input
-                                  type="date"
-                                  min={dataMinimaAgendamento}
-                                  value={dataInicio}
-                                  onChange={(e) => atualizarDataInicioEfetivacao(turma.id, e.target.value)}
-                                  style={{ colorScheme: "dark" }}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm"
-                                />
+                          {dadosEfetivacao.dataInicioPlano && !dataInicioPlanoValida && (
+                            <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                              Escolha uma data de início igual ou posterior a hoje.
+                            </div>
+                          )}
+                        </div>
 
-                                {dataInicio && !dataValida && (
-                                  <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-                                    A data precisa cair em {turma.dia_semana}.
-                                  </div>
-                                )}
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 mb-2">
+                              Confirmadas agora
+                            </p>
+                            {turmasEfetivacaoDiretas.length > 0 ? (
+                              <div className="space-y-2">
+                                {turmasEfetivacaoDiretas.map((turma) => (
+                                  <p key={`direta-${turma.id}`} className="text-sm text-white">
+                                    {turma.dia_semana} às {turma.horario.substring(0, 5)} • {obterNomeProfessorTurma(turma)}
+                                  </p>
+                                ))}
                               </div>
-                            );
-                          })}
+                            ) : (
+                              <p className="text-sm text-emerald-200/80">
+                                Nenhuma turma será confirmada diretamente neste envio.
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="rounded-xl border border-orange-500/20 bg-orange-500/10 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-orange-300 mb-2">
+                              Aguardando aceite
+                            </p>
+                            {turmasEfetivacaoAguardandoAceite.length > 0 ? (
+                              <div className="space-y-2">
+                                {turmasEfetivacaoAguardandoAceite.map((turma) => (
+                                  <p key={`pendente-aceite-${turma.id}`} className="text-sm text-white">
+                                    {turma.dia_semana} às {turma.horario.substring(0, 5)} • {obterNomeProfessorTurma(turma)}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-orange-200/80">
+                                Nenhuma turma depende de aceite de outro professor.
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2770,7 +2968,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         dadosEdicaoAluno.turmasIds.length > 0 &&
                         !datasEdicaoAlunoValidas) ||
                       (tipoModal === "efetivar_aluno" &&
-                        (dadosEfetivacao.turmasIds.length === 0 || !datasEfetivacaoValidas))
+                        (dadosEfetivacao.turmasIds.length === 0 || !dataInicioPlanoValida))
                     }
                     className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50"
                   >
@@ -2784,7 +2982,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                             ? "Salvar Horários"
                         : tipoModal === "efetivar_aluno"
                           ? dadosEfetivacao.solicitacaoId
-                            ? "Salvar Turmas Reais"
+                            ? "Salvar Plano"
                             : "Confirmar Matrículas"
                           : tipoModal === "ver_solicitacao"
                             ? "Salvar Responsável"
@@ -3270,8 +3468,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         )}
       </AnimatePresence>
 
-
-        <main className="max-w-5xl mx-auto px-4 sm:px-6 pt-16 sm:pt-24 pb-36 sm:pb-10">
+        <main className="max-w-5xl mx-auto px-4 pt-3 sm:px-6 sm:pt-24 pb-36 sm:pb-10">
         <nav className="hidden sm:block mb-8">
           <div className={`hidden sm:grid sm:grid-cols-2 ${classesGridDesktopNavegacao} gap-3`}>
             {navegacaoAdmin.map((item) => {
@@ -3421,11 +3618,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                   <span className="text-[10px] px-2 py-0.5 rounded-md uppercase border border-slate-700 bg-slate-950 text-slate-300">
                                     Nível {aluno.perfil.nivel || "N/A"}
                                   </span>
-                                  {aluno.perfil.permitir_nova_experimental === false && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-md uppercase border border-amber-500/20 bg-amber-500/10 text-amber-300">
-                                      Experimental bloqueada
-                                    </span>
-                                  )}
                                 </div>
                               </div>
                             </div>
@@ -3451,6 +3643,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                             <div className="text-xs text-slate-500">
                               {aluno.possuiMatriculasAtivas
                                 ? `${aluno.matriculasAtivas.length} turma(s) ativa(s)`
+                                : aluno.possuiAceitesPendentes
+                                  ? `${aluno.matriculasPendentesAceite.length} turma(s) aguardando aceite`
                                 : aluno.possuiFluxoExperimental
                                   ? "Em fluxo experimental"
                                   : "Cadastro sem turma ativa"}
@@ -3495,7 +3689,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                   <div>
                     <h2 className="text-lg sm:text-xl font-bold text-white">Matriculados</h2>
                     <p className="text-xs sm:text-sm text-slate-400">
-                      Um card por aluno matriculado. Ao visualizar, você vê todas as turmas em que ele está.
+                      Um card por aluno, incluindo turmas confirmadas e pendentes de aceite. Ao visualizar, você vê todas elas.
                     </p>
                   </div>
 
@@ -3542,17 +3736,29 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
                 {alunosMatriculadosFiltrados.length === 0 ? (
                   <div className="text-center py-20 bg-slate-900/30 rounded-2xl border border-slate-800/50 text-slate-500 text-sm">
-                    Nenhum aluno com matrícula ativa no momento.
+                    Nenhum aluno matriculado ou aguardando aceite no momento.
                   </div>
                 ) : (
                   <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                     {alunosMatriculadosFiltrados.map((aluno) => {
                       const idade = calcularIdade(aluno.perfil.data_nascimento);
+                      const totalTurmasConfirmadas = aluno.matriculasAtivas.length;
+                      const totalTurmasPendentes = aluno.matriculasPendentesAceite.length;
+                      const podeEditarHorarios = totalTurmasConfirmadas > 0;
+                      const horariosPendentesAceite = aluno.matriculasPendentesAceite
+                        .map(({ matricula }) => {
+                          const turma = matricula.turmas || turmas.find((item) => item.id === matricula.turma_id);
+                          return turma ? `${turma.dia_semana.substring(0, 3)} ${turma.horario.substring(0, 5)}` : null;
+                        })
+                        .filter((horario): horario is string => !!horario);
                       const professoresAtivos = Array.from(
                         new Set(
-                          aluno.matriculasAtivas
-                            .map(({ matricula }) => obterNomeProfessorTurma(matricula.turmas))
-                            .filter(Boolean)
+                          [...aluno.matriculasAtivas, ...aluno.matriculasPendentesAceite]
+                            .map(({ matricula }) => {
+                              const turma = matricula.turmas || turmas.find((item) => item.id === matricula.turma_id);
+                              return turma ? obterNomeProfessorTurma(turma) : null;
+                            })
+                            .filter((professor): professor is string => !!professor)
                         )
                       ).join(", ");
 
@@ -3580,9 +3786,16 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                       {idade} anos
                                     </span>
                                   )}
-                                  <span className="text-[10px] px-2 py-0.5 rounded-md uppercase border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
-                                    {aluno.matriculasAtivas.length} turma(s) ativa(s)
-                                  </span>
+                                  {totalTurmasConfirmadas > 0 && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded-md uppercase border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
+                                      {totalTurmasConfirmadas} turma(s) confirmada(s)
+                                    </span>
+                                  )}
+                                  {totalTurmasPendentes > 0 && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded-md uppercase border border-amber-500/20 bg-amber-500/10 text-amber-300">
+                                      {totalTurmasPendentes} aguardando aceite
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -3590,20 +3803,43 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
                           <div className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3">
                             <p className="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-2">
-                              Horários Ativos
+                              Horários do plano
                             </p>
-                            {aluno.horariosAtivos.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {aluno.horariosAtivos.map((horario) => (
-                                  <span
-                                    key={`matriculado-${aluno.perfil.id}-${horario}`}
-                                    className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200"
-                                  >
-                                    {horario}
-                                  </span>
-                                ))}
+                            {aluno.horariosAtivos.length > 0 && (
+                              <div>
+                                <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                                  Confirmadas
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {aluno.horariosAtivos.map((horario) => (
+                                    <span
+                                      key={`matriculado-ativo-${aluno.perfil.id}-${horario}`}
+                                      className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200"
+                                    >
+                                      {horario}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
-                            ) : (
+                            )}
+                            {horariosPendentesAceite.length > 0 && (
+                              <div className={aluno.horariosAtivos.length > 0 ? "mt-3" : ""}>
+                                <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                                  Aguardando aceite
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {horariosPendentesAceite.map((horario) => (
+                                    <span
+                                      key={`matriculado-pendente-${aluno.perfil.id}-${horario}`}
+                                      className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs font-bold text-amber-200"
+                                    >
+                                      {horario}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {aluno.horariosAtivos.length === 0 && horariosPendentesAceite.length === 0 && (
                               <p className="text-sm text-slate-200">Abra o perfil para ver as turmas.</p>
                             )}
                             {professoresAtivos && (
@@ -3618,19 +3854,27 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                               <div className="text-xs text-slate-500">
                                 {aluno.matriculasInativas.length} turma(s) encerrada(s) no histórico
                               </div>
+                            ) : totalTurmasPendentes > 0 ? (
+                              <div className="text-xs text-slate-500">
+                                {totalTurmasConfirmadas > 0
+                                  ? `${totalTurmasConfirmadas} confirmada(s) • ${totalTurmasPendentes} aguardando aceite`
+                                  : `${totalTurmasPendentes} turma(s) aguardando aceite`}
+                              </div>
                             ) : (
                               <div />
                             )}
 
                             <div className="flex items-center gap-2 w-full sm:w-auto">
-                              <button
-                                type="button"
-                                onClick={() => abrirEdicaoHorariosAluno(aluno.matriculaRepresentante)}
-                                className="flex-1 sm:flex-none justify-center px-4 py-2.5 bg-orange-500 text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-orange-600 transition-colors flex items-center gap-2"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                                Editar horários
-                              </button>
+                              {podeEditarHorarios && (
+                                <button
+                                  type="button"
+                                  onClick={() => abrirEdicaoHorariosAluno(aluno.matriculaRepresentante)}
+                                  className="flex-1 sm:flex-none justify-center px-4 py-2.5 bg-orange-500 text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-orange-600 transition-colors flex items-center gap-2"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                  Editar horários
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => abrirDetalhesAluno(aluno.matriculaRepresentante)}

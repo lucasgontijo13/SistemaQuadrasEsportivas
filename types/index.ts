@@ -26,8 +26,10 @@ export interface Matricula {
   id: number;
   perfil_id: string;
   turma_id: number;
-  status: 'experimental' | 'ativo' | 'inativo' | 'aguardando_dados' | 'aguardando_pagamento' | 'pendente';
+  status: 'experimental' | 'ativo' | 'inativo' | 'aguardando_dados' | 'aguardando_pagamento' | 'pendente' | 'aguardando_aceite_professor';
   data_inicio?: string | null;
+  status_pos_aceite?: 'ativo' | 'aguardando_dados' | 'aguardando_pagamento' | null;
+  professor_indicacao_id?: string | null;
   perfis?: Perfil; 
   turmas?: Turma; 
 }

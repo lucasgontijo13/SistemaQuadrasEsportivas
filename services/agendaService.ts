@@ -28,7 +28,7 @@ export async function buscarMinhaAgenda(): Promise<Matricula[]> {
           nome
         ),
         matriculas (
-          perfis (
+          perfis:perfis!matriculas_perfil_id_fkey (
             nome
           )
         )

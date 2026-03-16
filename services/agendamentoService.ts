@@ -20,7 +20,7 @@ export async function buscarTurmasComAlunos(): Promise<Turma[]> {
       ativa,
       matriculas (
         status,
-        perfis ( nome )
+        perfis:perfis!matriculas_perfil_id_fkey ( nome )
       )
     `);
     
