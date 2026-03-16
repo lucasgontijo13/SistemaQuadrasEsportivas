@@ -490,6 +490,86 @@ export async function atualizarPerfil(perfilId: string, dados: Partial<Perfil>) 
   return true;
 }
 
+export async function atualizarMatriculaAluno({
+  matriculaId,
+  perfilId,
+  nivel,
+  turmaId,
+  dataInicio,
+  solicitacaoId,
+}: {
+  matriculaId: number;
+  perfilId: string;
+  nivel: string;
+  turmaId: number;
+  dataInicio: string;
+  solicitacaoId?: string | null;
+}) {
+  if (!perfilId) throw new Error("Aluno não identificado para atualização.");
+  if (!turmaId) throw new Error("Selecione a turma do aluno.");
+  if (!dataInicio) throw new Error("Escolha a data de início nesta turma.");
+
+  const { data: turma, error: turmaError } = await supabase
+    .from("turmas")
+    .select("id, dia_semana, horario, vagas_totais, ativa, professor_id")
+    .eq("id", turmaId)
+    .maybeSingle();
+
+  if (turmaError) throw new Error(turmaError.message);
+  if (!turma || turma.ativa === false) {
+    throw new Error("A turma selecionada não está disponível.");
+  }
+
+  if (!dataCorrespondeAoDiaDaTurma(dataInicio, turma.dia_semana)) {
+    throw new Error(`A data escolhida precisa cair em ${turma.dia_semana}.`);
+  }
+
+  const { count, error: lotacaoError } = await supabase
+    .from("matriculas")
+    .select("*", { count: "exact", head: true })
+    .eq("turma_id", turmaId)
+    .neq("status", "inativo")
+    .neq("id", matriculaId);
+
+  if (lotacaoError) throw new Error(lotacaoError.message);
+  if ((count ?? 0) >= turma.vagas_totais) {
+    throw new Error("Essa turma já está lotada. Escolha outro horário.");
+  }
+
+  const { error: perfilError } = await supabase
+    .from("perfis")
+    .update({ nivel })
+    .eq("id", perfilId);
+
+  if (perfilError) throw new Error(perfilError.message);
+
+  const { error: matriculaError } = await supabase
+    .from("matriculas")
+    .update({ turma_id: turmaId, data_inicio: dataInicio })
+    .eq("id", matriculaId);
+
+  if (matriculaError) throw new Error(matriculaError.message);
+
+  if (solicitacaoId) {
+    const { error: solicitacaoError } = await supabase
+      .from("solicitacoes_aula_experimental")
+      .update({
+        data_aula_experimental: dataInicio,
+        professor_responsavel_id: turma.professor_id || null,
+      })
+      .eq("id", solicitacaoId);
+
+    if (solicitacaoError) throw new Error(solicitacaoError.message);
+  }
+
+  return {
+    diaSemana: turma.dia_semana,
+    horario: turma.horario,
+    professorId: turma.professor_id,
+    dataInicio,
+  };
+}
+
 export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: string) {
   const { data: professoresData } = await supabase
     .from("perfis")

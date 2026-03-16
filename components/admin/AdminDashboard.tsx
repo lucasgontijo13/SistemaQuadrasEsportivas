@@ -12,7 +12,7 @@ import {
 import { DadosTurma, Turma, HorarioQuadra, Matricula, Perfil, SolicitacaoAula } from "@/types";
 import { 
   verificarPermissaoAdmin, buscarDadosPainel, excluirRegistro, salvarTurma, 
-  salvarQuadra, efetivarMatricula, atualizarPerfil,
+  salvarQuadra, efetivarMatricula, atualizarPerfil, atualizarMatriculaAluno,
   cadastrarNovoProfessor, excluirProfessor, buscarSolicitacoesPendentes,
   assumirSolicitacaoAula,
   atualizarResponsavelSolicitacao, aceitarRepasseSolicitacao,
@@ -32,6 +32,8 @@ const maskPhone = (value: string) => {
     .replace(/(\d{5})(\d)/, "$1-$2") // Coloca o hífen depois do 5º dígito
     .replace(/(-\d{4})\d+?$/, "$1"); // Impede de digitar mais que 15 caracteres
 };
+
+const normalizarTelefone = (value?: string | null) => value?.replace(/\D/g, "") || "";
 
 const mapaDiaSemanaNumero: Record<string, number> = {
   Domingo: 0,
@@ -74,6 +76,9 @@ export type AdminSecao = "solicitacoes" | "alunos" | "turmas" | "aluguel" | "pro
 type AdminDashboardProps = {
   secaoAtiva: AdminSecao;
 };
+
+type FiltroAtencaoSolicitacoes = "sem_responsavel" | "aguardando_aceite" | null;
+type FiltroAtencaoAlunos = "aulas_hoje" | "sem_resultado" | "matricula_pendente" | null;
 
 export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const [dadosExtrasAluno, setDadosExtrasAluno] = useState<Perfil | null>(null);
@@ -120,6 +125,11 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const [erroModal, setErroModal] = useState("");
   // 2. Adicione este estado para controlar o nível no formulário
   const [nivelEdicao, setNivelEdicao] = useState("");
+  const [turmaEdicaoId, setTurmaEdicaoId] = useState<number | null>(null);
+  const [dataInicioEdicaoAluno, setDataInicioEdicaoAluno] = useState("");
+  const [filtroTipoAulaAlunos, setFiltroTipoAulaAlunos] = useState<"todos" | "experimental" | "regulares">("todos");
+  const [filtroAtencaoSolicitacoes, setFiltroAtencaoSolicitacoes] = useState<FiltroAtencaoSolicitacoes>(null);
+  const [filtroAtencaoAlunos, setFiltroAtencaoAlunos] = useState<FiltroAtencaoAlunos>(null);
   
   const [idEdicao, setIdEdicao] = useState<number | null>(null);
   const [alunoSelecionado, setAlunoSelecionado] = useState<Matricula | null>(null);
@@ -214,6 +224,25 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     referencia.setHours(0, 0, 0, 0);
 
     return referencia <= hoje;
+  };
+
+  const dataEhHoje = (valor?: string | null) => {
+    if (!valor) return false;
+
+    const hoje = formatarDataISO(new Date());
+    return formatarDataISO(new Date(`${valor}T12:00:00`)) === hoje;
+  };
+
+  const dataJaPassou = (valor?: string | null) => {
+    if (!valor) return false;
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    const referencia = new Date(`${valor}T12:00:00`);
+    referencia.setHours(0, 0, 0, 0);
+
+    return referencia < hoje;
   };
 
   const dataCompativelComTurma = (data: string, turma?: Turma | null) => {
@@ -388,9 +417,18 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     setModalAberto(true);
   };
 
-  const abrirEdicaoNivel = (matricula: Matricula) => {
+  const abrirEdicaoAluno = (matricula: Matricula) => {
+    const turmaAtual = matricula.turmas || turmas.find((turma) => turma.id === matricula.turma_id) || null;
+    const dataInicial =
+      matricula.data_inicio && dataCompativelComTurma(matricula.data_inicio, turmaAtual)
+        ? matricula.data_inicio
+        : obterProximaDataDaTurma(turmaAtual);
+
     setAlunoSelecionado(matricula);
     setNivelEdicao(matricula.perfis?.nivel || "Iniciante");
+    setTurmaEdicaoId(matricula.turma_id || turmaAtual?.id || null);
+    setDataInicioEdicaoAluno(dataInicial);
+    setErroModal("");
     setTipoModal("editar_aluno");
     setModalAberto(true);
   };
@@ -489,7 +527,36 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         await salvarTurma(novaTurma, idEdicao);
       } 
       else if (tipoModal === "editar_aluno" && alunoSelecionado?.perfil_id) {
-        await atualizarPerfil(alunoSelecionado.perfil_id, { nivel: nivelEdicao });
+        if (alunoSelecionado.status === "experimental") {
+          await atualizarPerfil(alunoSelecionado.perfil_id, { nivel: nivelEdicao });
+          setModalSucesso({
+            aberto: true,
+            titulo: "Aluno Atualizado",
+            mensagem: `O nível de ${alunoSelecionado.perfis?.nome || "aluno"} foi atualizado com sucesso.`,
+          });
+        } else {
+          if (!turmaEdicaoId) {
+            throw new Error("Selecione a turma do aluno antes de salvar.");
+          }
+
+          if (!dataInicioEdicaoAluno || !dataCompativelComTurma(dataInicioEdicaoAluno, turmas.find((turma) => turma.id === turmaEdicaoId) || null)) {
+            throw new Error("Escolha uma data compatível com o dia da turma.");
+          }
+
+          const atualizacaoAluno = await atualizarMatriculaAluno({
+            matriculaId: alunoSelecionado.id,
+            perfilId: alunoSelecionado.perfil_id,
+            nivel: nivelEdicao,
+            turmaId: turmaEdicaoId,
+            dataInicio: dataInicioEdicaoAluno,
+            solicitacaoId: null,
+          });
+          setModalSucesso({
+            aberto: true,
+            titulo: "Aluno Atualizado",
+            mensagem: `${alunoSelecionado.perfis?.nome || "O aluno"} foi atualizado para ${atualizacaoAluno.diaSemana}, às ${atualizacaoAluno.horario.substring(0, 5)}.`,
+          });
+        }
       }
       else if (tipoModal === "quadra") {
         await salvarQuadra(novoHorarioQuadra, idEdicao);
@@ -913,6 +980,19 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       solicitacao.professor_responsavel_id ||
       solicitacao.professor_preferido_id ||
       (tipoLogado === "professor" ? usuarioLogadoId : "");
+    const telefoneLimpo = solicitacao.telefone_aluno.replace(/\D/g, "");
+    const matriculaExperimental = (
+      matriculas.find((matricula) => {
+        const mesmoTelefone = matricula.perfis?.whatsapp?.replace(/\D/g, "") === telefoneLimpo;
+        return matricula.status === "experimental" && mesmoTelefone;
+      }) || null
+    );
+    const turmaExperimental =
+      matriculaExperimental?.turmas ||
+      turmas.find((turma) => turma.id === matriculaExperimental?.turma_id) ||
+      null;
+    const dataAgendamentoExistente =
+      solicitacao.data_aula_experimental || matriculaExperimental?.data_inicio || "";
 
     setSolicitacaoSelecionada(solicitacao);
     setSolicitacaoRecusaRepasse(null);
@@ -923,19 +1003,20 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     setProfessorTransferenciaSelecionado("");
     setTurmaSugeridaTransferenciaId(solicitacao.turma_sugerida_id || null);
     setModalTransferenciaAberto(false);
-    setTurmaExperimentalId(null);
-    setDataInicioExperimental("");
-    setDiaAgendamentoSolicitacao(obterPrimeiroDiaDisponivelSolicitacao(solicitacao, professorInicial));
+    setTurmaExperimentalId(matriculaExperimental?.turma_id || null);
+    setDataInicioExperimental(dataAgendamentoExistente);
+    setDiaAgendamentoSolicitacao(
+      turmaExperimental?.dia_semana || obterPrimeiroDiaDisponivelSolicitacao(solicitacao, professorInicial)
+    );
     setTipoModal("ver_solicitacao");
     setDadosExtrasAluno(null);
     setErroModal("");
     setModalAberto(true);
 
-    const foneLimpo = solicitacao.telefone_aluno.replace(/\D/g, "");
     const { data } = await supabase
       .from("perfis")
       .select("*")
-      .eq("whatsapp", foneLimpo)
+      .eq("whatsapp", telefoneLimpo)
       .single();
 
     if (data) {
@@ -957,6 +1038,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     setTurmaSugeridaTransferenciaId(null);
     setTurmaExperimentalId(null);
     setDataInicioExperimental("");
+    setTurmaEdicaoId(null);
+    setDataInicioEdicaoAluno("");
   };
 
   const turmasFiltradasNoModal = turmas.filter(t => t.dia_semana === diaFiltroModal);
@@ -1012,7 +1095,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     (turma) => turma.dia_semana === diaAgendamentoSolicitacao
   );
   const turmaExperimentalSelecionada =
-    turmasDisponiveisSolicitacao.find((turma) => turma.id === turmaExperimentalId) || null;
+    turmas.find((turma) => turma.id === turmaExperimentalId) ||
+    turmasDisponiveisSolicitacao.find((turma) => turma.id === turmaExperimentalId) ||
+    null;
   const dataInicioCompativelComTurma = dataCompativelComTurma(dataInicioExperimental, turmaExperimentalSelecionada);
   const nivelAlunoSolicitacao = dadosExtrasAluno?.nivel || solicitacaoSelecionada?.nivel_experiencia || "";
   const idadeAlunoSolicitacao = calcularIdade(
@@ -1039,6 +1124,135 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const professorTransferenciaEhValido =
     !!professorTransferenciaSelecionado &&
     professorTransferenciaSelecionado !== responsavelAtualSolicitacao;
+  const descricaoStatusSolicitacaoModal = (() => {
+    if (!solicitacaoSelecionada || solicitacaoAguardandoAceite) return "";
+
+    if (solicitacaoSelecionada.status === "agendado" && solicitacaoSelecionada.data_aula_experimental) {
+      return "";
+    }
+
+    if (!responsavelAtualSolicitacao) {
+      return "";
+    }
+
+    return obterDescricaoStatusSolicitacao(solicitacaoSelecionada);
+  })();
+  const solicitacoesDaFila = solicitacoes.filter((solicitacao) =>
+    ["pendente", "aguardando_aceite_professor", "em_contato"].includes(solicitacao.status)
+  );
+  const solicitacoesPorTelefone = solicitacoes.reduce((mapa, solicitacao) => {
+    const telefone = normalizarTelefone(solicitacao.telefone_aluno);
+    if (!telefone) return mapa;
+
+    const existente = mapa.get(telefone);
+    if (!existente || new Date(solicitacao.created_at).getTime() >= new Date(existente.created_at).getTime()) {
+      mapa.set(telefone, solicitacao);
+    }
+
+    return mapa;
+  }, new Map<string, SolicitacaoAula>());
+  const obterSolicitacaoRelacionadaMatricula = (matricula?: Matricula | null) => {
+    if (!matricula?.perfis?.whatsapp) return null;
+    return solicitacoesPorTelefone.get(normalizarTelefone(matricula.perfis.whatsapp)) || null;
+  };
+  const turmasEditaveisAluno = turmas
+    .filter((turma) => turma.ativa !== false)
+    .filter((turma) => tipoLogado === "admin" || turma.professor_id === usuarioLogadoId)
+    .sort((a, b) => {
+      const indiceDiaA = diasDaSemanaModal.indexOf(a.dia_semana);
+      const indiceDiaB = diasDaSemanaModal.indexOf(b.dia_semana);
+
+      if (indiceDiaA !== indiceDiaB) {
+        return indiceDiaA - indiceDiaB;
+      }
+
+      return a.horario.localeCompare(b.horario);
+    });
+  const turmaEdicaoSelecionada =
+    turmasEditaveisAluno.find((turma) => turma.id === turmaEdicaoId) || null;
+  const dataEdicaoAlunoValida = !!dataInicioEdicaoAluno && dataCompativelComTurma(dataInicioEdicaoAluno, turmaEdicaoSelecionada);
+  const totalAlunosExperimentais = matriculas.filter((matricula) => matricula.status === "experimental").length;
+  const totalAlunosRegulares = matriculas.filter((matricula) => matricula.status !== "experimental").length;
+  const matriculasBaseAlunos = matriculas.filter((matricula) => {
+    if (filtroTipoAulaAlunos === "experimental") {
+      return matricula.status === "experimental";
+    }
+
+    if (filtroTipoAulaAlunos === "regulares") {
+      return matricula.status !== "experimental";
+    }
+
+    return true;
+  });
+  const matriculasComContexto = matriculasBaseAlunos.map((matricula) => {
+    const solicitacaoRelacionada =
+      matricula.status === "experimental" ? obterSolicitacaoRelacionadaMatricula(matricula) : null;
+    const experimentalAguardandoResultado =
+      solicitacaoRelacionada?.status === "agendado" && dataJaChegou(solicitacaoRelacionada.data_aula_experimental);
+    const experimentalAulaHoje =
+      solicitacaoRelacionada?.status === "agendado" && dataEhHoje(solicitacaoRelacionada.data_aula_experimental);
+    const experimentalSemResultado =
+      solicitacaoRelacionada?.status === "agendado" && dataJaPassou(solicitacaoRelacionada.data_aula_experimental);
+    const experimentalProntoParaMatricula = solicitacaoRelacionada?.status === "aprovada_para_matricula";
+    const experimentalMatriculaPendente =
+      solicitacaoRelacionada?.status === "aprovada_para_matricula" ||
+      solicitacaoRelacionada?.status === "matricula_em_andamento";
+
+    return {
+      matricula,
+      solicitacaoRelacionada,
+      experimentalAguardandoResultado,
+      experimentalAulaHoje,
+      experimentalSemResultado,
+      experimentalProntoParaMatricula,
+      experimentalMatriculaPendente,
+    };
+  });
+  const totalSolicitacoesSemResponsavel = solicitacoesDaFila.filter(
+    (solicitacao) =>
+      !solicitacao.professor_responsavel_id && solicitacao.status !== "aguardando_aceite_professor"
+  ).length;
+  const totalSolicitacoesAguardandoAceite = solicitacoesDaFila.filter(
+    (solicitacao) =>
+      solicitacao.status === "aguardando_aceite_professor" &&
+      (tipoLogado === "admin" || solicitacao.professor_responsavel_id === usuarioLogadoId)
+  ).length;
+  const solicitacoesFiltradas = solicitacoesDaFila.filter((solicitacao) => {
+    if (filtroAtencaoSolicitacoes === "sem_responsavel") {
+      return !solicitacao.professor_responsavel_id && solicitacao.status !== "aguardando_aceite_professor";
+    }
+
+    if (filtroAtencaoSolicitacoes === "aguardando_aceite") {
+      return (
+        solicitacao.status === "aguardando_aceite_professor" &&
+        (tipoLogado === "admin" || solicitacao.professor_responsavel_id === usuarioLogadoId)
+      );
+    }
+
+    return true;
+  });
+  const totalAlunosAulaHoje = matriculasComContexto.filter(({ experimentalAulaHoje }) => experimentalAulaHoje).length;
+  const totalAlunosSemResultado = matriculasComContexto.filter(
+    ({ experimentalSemResultado }) => experimentalSemResultado
+  ).length;
+  const totalAlunosMatriculaPendente = matriculasComContexto.filter(
+    ({ experimentalMatriculaPendente }) => experimentalMatriculaPendente
+  ).length;
+  const matriculasFiltradasAlunos = matriculasComContexto.filter((item) => {
+    if (filtroAtencaoAlunos === "aulas_hoje") {
+      return item.experimentalAulaHoje;
+    }
+
+    if (filtroAtencaoAlunos === "sem_resultado") {
+      return item.experimentalSemResultado;
+    }
+
+    if (filtroAtencaoAlunos === "matricula_pendente") {
+      return item.experimentalMatriculaPendente;
+    }
+
+    return true;
+  });
   const turmasFiltradasPorProfessor =
     tipoLogado === "admin" && professorFiltroTurmas !== "todos"
       ? turmas.filter((turma) => turma.professor_id === professorFiltroTurmas)
@@ -1056,7 +1270,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       label: "Solicitacoes",
       icon: BellRing,
       mostrar: true,
-      badge: solicitacoes.length > 0 ? solicitacoes.length : null,
+      badge: solicitacoesDaFila.length > 0 ? solicitacoesDaFila.length : null,
     },
     {
       id: "alunos" as AdminSecao,
@@ -1120,26 +1334,35 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
               initial={{ scale: 0.95, opacity: 0 }} 
               animate={{ scale: 1, opacity: 1 }} 
               exit={{ scale: 0.95, opacity: 0 }} 
-              className={`bg-slate-900 border border-slate-800 p-6 sm:p-8 rounded-[2rem] shadow-2xl w-full relative z-10 max-h-[85vh] overflow-y-auto scrollbar-hide ${tipoModal === "efetivar_aluno" ? "max-w-lg sm:max-w-xl" : tipoModal === "ver_solicitacao" ? "max-w-lg sm:max-w-xl" : "max-w-md"}`}
+              className={`bg-slate-900 border border-slate-800 rounded-[2rem] shadow-2xl w-full relative z-10 max-h-[85vh] overflow-hidden flex flex-col ${tipoModal === "efetivar_aluno" ? "max-w-lg sm:max-w-xl" : tipoModal === "ver_solicitacao" ? "max-w-lg sm:max-w-xl" : "max-w-md"}`}
             >
-              
-              <button onClick={fecharModalPrincipal} className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors bg-slate-800/50 p-2 rounded-full"><X className="w-5 h-5" /></button>
-              
-              <h2 className="text-xl sm:text-2xl font-bold text-white mb-6 tracking-tight pr-10">
-                {tipoModal === "turma"
-                  ? "Nova Turma"
-                  : tipoModal === "editar_turma"
-                    ? "Editar Turma"
-                    : tipoModal === "quadra"
-                      ? "Novo Horário"
-                      : tipoModal === "ver_solicitacao"
-                        ? "Aula Experimental"
-                        : dadosEfetivacao.solicitacaoId
-                          ? "Montar Treino"
-                          : "Efetivar Aluno"}
-              </h2>
+              <div className="relative px-6 pt-6 pb-5 sm:px-8 sm:pt-8 sm:pb-6 border-b border-slate-800 bg-slate-900/95 backdrop-blur">
+                <button onClick={fecharModalPrincipal} className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors bg-slate-800/50 p-2 rounded-full sm:top-7 sm:right-7"><X className="w-5 h-5" /></button>
+                
+                <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight pr-12">
+                  {tipoModal === "turma"
+                    ? "Nova Turma"
+                    : tipoModal === "editar_turma"
+                      ? "Editar Turma"
+                      : tipoModal === "ver_aluno"
+                        ? "Dados do Aluno"
+                        : tipoModal === "editar_aluno"
+                          ? "Editar Aluno"
+                      : tipoModal === "quadra"
+                        ? "Novo Horário"
+                        : tipoModal === "professor"
+                          ? "Novo Professor"
+                          : tipoModal === "editar_professor"
+                            ? "Editar Professor"
+                        : tipoModal === "ver_solicitacao"
+                          ? "Aula Experimental"
+                          : dadosEfetivacao.solicitacaoId
+                            ? "Montar Treino"
+                            : "Efetivar Aluno"}
+                </h2>
+              </div>
 
-              <form onSubmit={salvarDados} className="space-y-4">
+              <form onSubmit={salvarDados} className="flex-1 overflow-y-auto scrollbar-hide px-6 py-5 sm:px-8 sm:py-6 space-y-4">
                 {erroModal && (
                   <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-start gap-3 text-sm font-medium mb-4">
                     <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -1162,7 +1385,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                           {/* BOTÃO PARA EDITAR NÍVEL */}
                           <button 
                             type="button"
-                            onClick={() => abrirEdicaoNivel(alunoSelecionado)}
+                            onClick={() => abrirEdicaoAluno(alunoSelecionado)}
                             className="text-[10px] text-orange-500 hover:underline font-bold"
                           >
                             (Alterar)
@@ -1218,10 +1441,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       <div className="flex justify-between items-start mb-3">
                         <div>
                           <h3 className="font-bold text-white text-lg mb-1">{solicitacaoSelecionada.nome_aluno}</h3>
-                          <p className="text-slate-400 text-sm">
-                            {solicitacaoSelecionada.telefone_aluno}
-                            {idadeAlunoSolicitacao !== null ? ` • ${idadeAlunoSolicitacao} anos` : ""}
-                          </p>
+                          <p className="text-slate-400 text-sm">{solicitacaoSelecionada.telefone_aluno}</p>
                         </div>
                         <span className="bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] uppercase font-bold px-2 py-1 rounded whitespace-nowrap flex-shrink-0">
                           {dadosExtrasAluno?.nivel || solicitacaoSelecionada.nivel_experiencia || "NÍVEL NÃO INFO."}
@@ -1262,10 +1482,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                        <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Status Atual</p>
-                        <p className="text-sm text-slate-200">{obterLabelStatusSolicitacao(solicitacaoSelecionada)}</p>
-                      </div>
                       {solicitacaoSelecionada.data_aula_experimental && (
                         <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
                           <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Aula Experimental</p>
@@ -1323,9 +1539,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       )}
                     </div>
 
-                    {!solicitacaoAguardandoAceite && (
+                    {!!descricaoStatusSolicitacaoModal && (
                       <div className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-sm text-slate-300">
-                        {obterDescricaoStatusSolicitacao(solicitacaoSelecionada)}
+                        {descricaoStatusSolicitacaoModal}
                       </div>
                     )}
 
@@ -1419,7 +1635,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         className="w-full flex items-center justify-center gap-2 bg-[#25D366] text-white font-bold py-3.5 rounded-xl hover:bg-[#1ebd5a] transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <MessageCircle className="w-5 h-5" />
-                        Registrar Tentativa e Abrir WhatsApp
+                        WhatsApp
                       </button>
                     )}
 
@@ -1511,13 +1727,15 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                           <p className="text-sm text-slate-500 mt-1">
                             {solicitacaoAulaMarcada
                               ? "A aula experimental ja esta marcada. Se precisar, voce pode ajustar a turma ou a data."
-                              : "Abra o modal de agendamento para escolher a turma e a data da primeira aula."}
+                              : "Escolha a turma e a data da primeira aula para confirmar o agendamento."}
                           </p>
                         </div>
 
                         {turmaExperimentalSelecionada && dataInicioExperimental ? (
                           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3">
-                            <p className="text-[10px] uppercase font-bold tracking-wider text-emerald-300 mb-1">Pré-seleção</p>
+                            <p className="text-[10px] uppercase font-bold tracking-wider text-emerald-300 mb-1">
+                              {solicitacaoAulaMarcada ? "Aula confirmada" : "Seleção atual"}
+                            </p>
                             <p className="text-sm text-slate-100">
                               {turmaExperimentalSelecionada.dia_semana} às {turmaExperimentalSelecionada.horario.substring(0, 5)}
                             </p>
@@ -1790,12 +2008,12 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                   <div className="space-y-4">
                     <div className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-xl mb-4">
                       <p className="text-sm text-orange-400 font-medium text-center">
-                        Alterando nível de: <span className="text-white font-bold">{alunoSelecionado.perfis?.nome}</span>
+                        Editando dados de: <span className="text-white font-bold">{alunoSelecionado.perfis?.nome}</span>
                       </p>
                     </div>
                     
                     <div>
-                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Selecione o Novo Nível</label>
+                      <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nível do Aluno</label>
                       <select 
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500"
                         value={nivelEdicao}
@@ -1807,6 +2025,80 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         <option value="Pró">Pró</option>
                       </select>
                     </div>
+
+                    {alunoSelecionado.status === "experimental" ? (
+                      <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                          Aula Experimental
+                        </p>
+                        <p className="text-sm text-slate-300">
+                          Para reagendar turma, horário ou data da aula teste, use o botão <span className="font-semibold text-white">Ver Experimental</span>.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Turma / Horário</label>
+                          <select
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500"
+                            value={turmaEdicaoId || ""}
+                            onChange={(e) => {
+                              const novaTurmaId = Number(e.target.value);
+                              const novaTurma = turmasEditaveisAluno.find((turma) => turma.id === novaTurmaId) || null;
+                              setTurmaEdicaoId(novaTurmaId);
+                              setDataInicioEdicaoAluno((valorAtual) =>
+                                valorAtual && dataCompativelComTurma(valorAtual, novaTurma)
+                                  ? valorAtual
+                                  : obterProximaDataDaTurma(novaTurma)
+                              );
+                            }}
+                          >
+                            <option value="">Selecione uma turma</option>
+                            {turmasEditaveisAluno.map((turma) => (
+                              <option key={`edicao-aluno-turma-${turma.id}`} value={turma.id}>
+                                {turma.dia_semana} às {turma.horario.substring(0, 5)} • {obterNomeProfessorTurma(turma)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Data de Início</label>
+                          <input
+                            type="date"
+                            value={dataInicioEdicaoAluno}
+                            onChange={(e) => setDataInicioEdicaoAluno(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 [color-scheme:dark]"
+                          />
+                          <p className="text-xs text-slate-500 mt-2">
+                            A data precisa cair no mesmo dia da turma escolhida.
+                          </p>
+                        </div>
+
+                        {turmaEdicaoSelecionada && (
+                          <div className={`rounded-xl border p-3 ${
+                            dataEdicaoAlunoValida
+                              ? "border-emerald-500/20 bg-emerald-500/10"
+                              : "border-slate-800 bg-slate-950"
+                          }`}>
+                            <p className="text-[10px] uppercase font-bold tracking-wider text-slate-500 mb-1">Resumo</p>
+                            <p className="text-sm text-slate-100">
+                              {turmaEdicaoSelecionada.dia_semana} às {turmaEdicaoSelecionada.horario.substring(0, 5)}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">
+                              Professor: {obterNomeProfessorTurma(turmaEdicaoSelecionada)}
+                            </p>
+                            {dataInicioEdicaoAluno && (
+                              <p className={`text-xs mt-2 ${dataEdicaoAlunoValida ? "text-emerald-300" : "text-red-300"}`}>
+                                {dataEdicaoAlunoValida
+                                  ? `Início em ${formatarDataCurta(dataInicioEdicaoAluno)}`
+                                  : `Escolha uma data que caia em ${turmaEdicaoSelecionada.dia_semana}.`}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
                 {(tipoModal === "turma" || tipoModal === "editar_turma" || tipoModal === "quadra") && (
@@ -1863,6 +2155,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                     type="submit"
                     disabled={
                       carregando ||
+                      (tipoModal === "editar_aluno" &&
+                        (!turmaEdicaoId || !dataEdicaoAlunoValida)) ||
                       (tipoModal === "efetivar_aluno" &&
                         (dadosEfetivacao.turmasIds.length === 0 || !datasEfetivacaoValidas))
                     }
@@ -1872,6 +2166,8 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       ? "Processando..."
                       : tipoModal === "editar_turma"
                         ? "Salvar Alterações"
+                        : tipoModal === "editar_aluno"
+                          ? "Salvar Aluno"
                         : tipoModal === "efetivar_aluno"
                           ? dadosEfetivacao.solicitacaoId
                             ? "Salvar Turmas Reais"
@@ -2403,88 +2699,312 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
           <>
             {secaoAtiva === "alunos" && (
               <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-                {matriculas.length === 0 ? (
-                  <div className="text-center py-20 bg-slate-900/30 rounded-2xl border border-slate-800/50 text-slate-500 text-sm">Nenhum aluno cadastrado.</div>
+                <div className="flex flex-col gap-4 mb-6">
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-bold text-white">Alunos</h2>
+                    <p className="text-xs sm:text-sm text-slate-400">
+                      Acompanhe os experimentais já marcados e as turmas regulares em um só lugar.
+                    </p>
+                  </div>
+
+                  {(totalAlunosAulaHoje > 0 ||
+                    totalAlunosSemResultado > 0 ||
+                    totalAlunosMatriculaPendente > 0 ||
+                    filtroAtencaoAlunos) && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                        Precisa de atenção
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { id: "aulas_hoje" as const, label: "Aulas hoje", total: totalAlunosAulaHoje },
+                          { id: "sem_resultado" as const, label: "Sem resultado", total: totalAlunosSemResultado },
+                          {
+                            id: "matricula_pendente" as const,
+                            label: "Matrícula pendente",
+                            total: totalAlunosMatriculaPendente,
+                          },
+                        ]
+                          .filter((alerta) => alerta.total > 0 || filtroAtencaoAlunos === alerta.id)
+                          .map((alerta) => (
+                            <button
+                              key={`alerta-alunos-${alerta.id}`}
+                              type="button"
+                              onClick={() =>
+                                setFiltroAtencaoAlunos((atual) => (atual === alerta.id ? null : alerta.id))
+                              }
+                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold transition-colors ${
+                                filtroAtencaoAlunos === alerta.id
+                                  ? "border-orange-500 bg-orange-500 text-slate-950"
+                                  : "border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-700 hover:text-white"
+                              }`}
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              {alerta.label}
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] ${
+                                  filtroAtencaoAlunos === alerta.id
+                                    ? "bg-slate-950/10"
+                                    : "bg-slate-950 text-slate-400"
+                                }`}
+                              >
+                                {alerta.total}
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: "todos" as const, label: "Todos", total: matriculas.length },
+                      { id: "experimental" as const, label: "Experimentais", total: totalAlunosExperimentais },
+                      { id: "regulares" as const, label: "Turmas Fixas", total: totalAlunosRegulares },
+                    ].map((filtro) => (
+                      <button
+                        key={`filtro-alunos-${filtro.id}`}
+                        type="button"
+                        onClick={() => {
+                          setFiltroTipoAulaAlunos(filtro.id);
+                          setFiltroAtencaoAlunos(null);
+                        }}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold transition-colors ${
+                          filtroTipoAulaAlunos === filtro.id
+                            ? "border-orange-500 bg-orange-500 text-slate-950"
+                            : "border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-700 hover:text-white"
+                        }`}
+                      >
+                        {filtro.label}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] ${
+                          filtroTipoAulaAlunos === filtro.id ? "bg-slate-950/10" : "bg-slate-950 text-slate-400"
+                        }`}>
+                          {filtro.total}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {matriculasFiltradasAlunos.length === 0 ? (
+                  <div className="text-center py-20 bg-slate-900/30 rounded-2xl border border-slate-800/50 text-slate-500 text-sm">
+                    Nenhum aluno encontrado neste filtro.
+                  </div>
                 ) : (
                   <motion.div variants={container} initial="hidden" animate="show" className="space-y-3">
-                    {matriculas.map((mat) => (
-                      <motion.div key={mat.id} variants={item} className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
-                        <div className="flex items-center gap-3 sm:gap-4">
-                          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 flex-shrink-0">{mat.perfis?.nome?.charAt(0) || "?"}</div>
-                          <div>
-                            {/* MUDANÇA: Etiquetas coloridas representando o Funil/Máquina de Estados */}
-                            <h3 className="font-bold text-white flex flex-wrap items-center gap-2 text-sm sm:text-base leading-tight">
-                              {mat.perfis?.nome || "Aluno"}
-                              {mat.status === "experimental" && <span className="text-[9px] sm:text-[10px] bg-orange-500/10 border border-orange-500/20 text-orange-500 px-2 py-0.5 rounded-md uppercase">Experimental</span>}
-                              {mat.status === "aguardando_dados" && <span className="text-[9px] sm:text-[10px] bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-md uppercase">Aguardando Dados</span>}
-                              {mat.status === "aguardando_pagamento" && <span className="text-[9px] sm:text-[10px] bg-sky-500/10 border border-sky-500/20 text-sky-400 px-2 py-0.5 rounded-md uppercase">Aguardando Pgto</span>}
-                              {mat.status === "ativo" && <span className="text-[9px] sm:text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded-md uppercase">Ativo</span>}
-                            </h3>
-                            <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                              Nível {mat.perfis?.nivel || "N/A"} • {mat.turmas?.dia_semana.substring(0,3)} às {mat.turmas?.horario?.substring(0,5)}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2 w-full sm:w-auto border-t border-slate-800 pt-3 sm:border-t-0 sm:pt-0">
-                          {mat.status === "experimental" && (
-                            <button onClick={() => abrirModalEfetivar(mat)} className="flex-1 sm:flex-none justify-center px-4 py-2 sm:py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-emerald-600 transition-colors flex items-center gap-2"><UserCheck className="w-4 h-4" /> Efetivar</button>
-                          )}
-                          <button 
-                            onClick={() => abrirEdicaoNivel(mat)} 
-                            className="flex-1 sm:flex-none flex justify-center p-2.5 text-slate-400 bg-slate-800 sm:bg-transparent hover:text-white hover:bg-slate-800 rounded-xl transition-all sm:opacity-0 group-hover:opacity-100 flex-shrink-0"
-                          >
-                            <Edit2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setModalConfirmacao({
-                                aberto: true,
-                                titulo: "Remover Aluno da Turma",
-                                mensagem: "Tem a certeza? O perfil continuará no sistema para evitar novos cadastros gratuitos, mas ele será removido desta turma.",
-                                acao: async () => {
-                                  setModalConfirmacao(prev => ({ ...prev, aberto: false }));
-                                  setCarregando(true);
-                                  try {
-                                    // Lógica original: Exclui APENAS a matrícula
-                                    await excluirRegistro('matriculas', mat.id);
-                                    await buscarDados();
-                                  } catch (error) {
-                                    console.error("Erro ao remover matrícula:", error); // Agora ele está sendo usado!
-                                    alert("Erro ao remover matrícula.");
-                                  } finally {
-                                    setCarregando(false);
-                                  }
-                                }
-                              });
-                            }} 
-                            className="p-2 sm:p-2.5 text-slate-500 bg-slate-800 sm:bg-transparent hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all sm:opacity-0 group-hover:opacity-100 flex-shrink-0"
-                          >
-                            <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                          </button>
-                        </div>
-                      </motion.div>
-                    ))}
+                    {matriculasFiltradasAlunos.map(
+                      ({
+                        matricula: mat,
+                        solicitacaoRelacionada,
+                        experimentalAguardandoResultado,
+                        experimentalSemResultado,
+                        experimentalProntoParaMatricula,
+                      }) => {
+                        const labelAcaoExperimental = experimentalAguardandoResultado
+                          ? "Registrar Resultado"
+                          : experimentalProntoParaMatricula
+                            ? "Montar Treino"
+                            : "Ver Experimental";
+                        const labelStatusMatricula =
+                          mat.status === "experimental" && solicitacaoRelacionada
+                            ? obterLabelStatusSolicitacao(solicitacaoRelacionada)
+                            : mat.status === "aguardando_dados"
+                              ? "Aguardando Dados"
+                              : mat.status === "aguardando_pagamento"
+                                ? "Aguardando Pagto"
+                                : mat.status === "ativo"
+                                  ? "Ativo"
+                                  : mat.status === "inativo"
+                                    ? "Inativo"
+                                    : "Pendente";
+
+                        return (
+                          <motion.div key={mat.id} variants={item} className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col gap-4 group">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-800 flex items-center justify-center font-bold text-slate-400 flex-shrink-0">
+                                  {mat.perfis?.nome?.charAt(0) || "?"}
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="font-bold text-white flex flex-wrap items-center gap-2 text-sm sm:text-base leading-tight">
+                                    <span className="truncate">{mat.perfis?.nome || "Aluno"}</span>
+                                    {mat.status === "experimental" && (
+                                      <span className="text-[9px] sm:text-[10px] bg-orange-500/10 border border-orange-500/20 text-orange-500 px-2 py-0.5 rounded-md uppercase">
+                                        Experimental
+                                      </span>
+                                    )}
+                                    <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md uppercase border ${
+                                      mat.status === "ativo"
+                                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                        : mat.status === "aguardando_pagamento"
+                                          ? "bg-sky-500/10 border-sky-500/20 text-sky-400"
+                                          : mat.status === "aguardando_dados"
+                                            ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400"
+                                            : mat.status === "experimental"
+                                              ? "bg-slate-950 border-slate-700 text-slate-300"
+                                              : "bg-slate-950 border-slate-700 text-slate-400"
+                                    }`}>
+                                      {labelStatusMatricula}
+                                    </span>
+                                    {experimentalSemResultado && (
+                                      <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md uppercase border border-amber-500/20 bg-amber-500/10 text-amber-300">
+                                        Ação necessária
+                                      </span>
+                                    )}
+                                  </h3>
+                                  <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                                    Nível {mat.perfis?.nivel || "N/A"} • {mat.turmas?.dia_semana.substring(0, 3)} às {mat.turmas?.horario?.substring(0, 5)}
+                                  </p>
+                                  {mat.data_inicio && (
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      Início em {formatarDataCurta(mat.data_inicio)}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-slate-800 pt-3">
+                              <div className="text-xs text-slate-500">
+                                {mat.status === "experimental" && solicitacaoRelacionada
+                                  ? `Fluxo experimental: ${obterDescricaoStatusSolicitacao(solicitacaoRelacionada)}`
+                                  : `Professor: ${obterNomeProfessorTurma(mat.turmas)}`}
+                              </div>
+
+                              <div className="flex items-center gap-2 w-full sm:w-auto">
+                                {mat.status === "experimental" && solicitacaoRelacionada && (
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalSolicitacao(solicitacaoRelacionada)}
+                                    className="flex-1 sm:flex-none justify-center px-4 py-2.5 bg-white text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                    {labelAcaoExperimental}
+                                  </button>
+                                )}
+                                {mat.status === "experimental" && experimentalProntoParaMatricula && !solicitacaoRelacionada && (
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalEfetivar(mat)}
+                                    className="flex-1 sm:flex-none justify-center px-4 py-2.5 bg-emerald-500 text-slate-950 font-bold text-xs sm:text-sm rounded-xl hover:bg-emerald-600 transition-colors flex items-center gap-2"
+                                  >
+                                    <UserCheck className="w-4 h-4" />
+                                    Efetivar
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => abrirEdicaoAluno(mat)}
+                                  className="flex-1 sm:flex-none justify-center px-4 py-2.5 bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl hover:bg-slate-700 transition-colors flex items-center gap-2"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setModalConfirmacao({
+                                      aberto: true,
+                                      titulo: "Remover Aluno da Turma",
+                                      mensagem: "Tem a certeza? O perfil continuará no sistema para evitar novos cadastros gratuitos, mas ele será removido desta turma.",
+                                      acao: async () => {
+                                        setModalConfirmacao(prev => ({ ...prev, aberto: false }));
+                                        setCarregando(true);
+                                        try {
+                                          await excluirRegistro("matriculas", mat.id);
+                                          await buscarDados();
+                                        } catch (error) {
+                                          console.error("Erro ao remover matrícula:", error);
+                                          alert("Erro ao remover matrícula.");
+                                        } finally {
+                                          setCarregando(false);
+                                        }
+                                      }
+                                    });
+                                  }}
+                                  className="p-2.5 text-slate-500 bg-slate-800 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all flex-shrink-0"
+                                >
+                                  <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+                    )}
                   </motion.div>
                 )}
               </motion.div>
             )}
             {secaoAtiva === "solicitacoes" && (
               <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                <div className="flex flex-col gap-4 mb-6">
                   <div>
                     <h2 className="text-lg sm:text-xl font-bold text-white">Solicitações de Aula</h2>
                     <p className="text-xs sm:text-sm text-slate-400">Novos alunos aguardando contato para agendar aula.</p>
                   </div>
+
+                  {(totalSolicitacoesSemResponsavel > 0 ||
+                    totalSolicitacoesAguardandoAceite > 0 ||
+                    filtroAtencaoSolicitacoes) && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                        Precisa de atenção
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          {
+                            id: "sem_responsavel" as const,
+                            label: "Sem responsável",
+                            total: totalSolicitacoesSemResponsavel,
+                          },
+                          {
+                            id: "aguardando_aceite" as const,
+                            label: tipoLogado === "professor" ? "Seu aceite" : "Aguardando aceite",
+                            total: totalSolicitacoesAguardandoAceite,
+                          },
+                        ]
+                          .filter((alerta) => alerta.total > 0 || filtroAtencaoSolicitacoes === alerta.id)
+                          .map((alerta) => (
+                            <button
+                              key={`alerta-solicitacoes-${alerta.id}`}
+                              type="button"
+                              onClick={() =>
+                                setFiltroAtencaoSolicitacoes((atual) => (atual === alerta.id ? null : alerta.id))
+                              }
+                              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold transition-colors ${
+                                filtroAtencaoSolicitacoes === alerta.id
+                                  ? "border-orange-500 bg-orange-500 text-slate-950"
+                                  : "border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-700 hover:text-white"
+                              }`}
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              {alerta.label}
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] ${
+                                  filtroAtencaoSolicitacoes === alerta.id
+                                    ? "bg-slate-950/10"
+                                    : "bg-slate-950 text-slate-400"
+                                }`}
+                              >
+                                {alerta.total}
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {solicitacoes.length === 0 ? (
+                {solicitacoesFiltradas.length === 0 ? (
                   <div className="text-center py-20 bg-slate-900/30 rounded-2xl border border-slate-800/50 text-slate-500 text-sm">
-                    Nenhuma solicitacao ativa no momento.
+                    {filtroAtencaoSolicitacoes
+                      ? "Nenhuma solicitação encontrada neste alerta."
+                      : "Nenhuma solicitacao ativa no momento."}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {solicitacoes.map((solicitacao) => {
+                    {solicitacoesFiltradas.map((solicitacao) => {
                       const cardAguardandoMeuAceite =
                         solicitacao.status === "aguardando_aceite_professor" &&
                         solicitacao.professor_responsavel_id === usuarioLogadoId;
@@ -2497,7 +3017,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         solicitacao.status === "agendado" && dataJaChegou(solicitacao.data_aula_experimental);
                       const cardProntoParaMatricula =
                         solicitacao.status === "aprovada_para_matricula";
-                      const idadeSolicitacao = calcularIdade(solicitacao.data_nascimento);
                       const labelBotaoVisualizar = cardAguardandoResultado
                         ? "Registrar Resultado"
                         : cardProntoParaMatricula
@@ -2513,10 +3032,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                 {solicitacao.nivel_experiencia || 'NÍVEL NÃO INFO.'}
                               </span>
                             </div>
-                            <p className="text-sm text-slate-400 mb-3">
-                              {solicitacao.telefone_aluno}
-                              {idadeSolicitacao !== null ? ` • ${idadeSolicitacao} anos` : ""}
-                            </p>
+                            <p className="text-sm text-slate-400 mb-3">{solicitacao.telefone_aluno}</p>
 
                             <div className="flex flex-wrap gap-2 mb-3">
                               <span className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-slate-700 bg-slate-950 text-slate-300">
