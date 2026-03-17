@@ -24,7 +24,6 @@ const STATUS_SOLICITACOES_EM_ANDAMENTO = [
 
 const STATUS_MATRICULAS_BLOQUEANTES = [
   "experimental",
-  "pendente",
   "ativo",
   "aguardando_dados",
   "aguardando_pagamento",
@@ -37,6 +36,38 @@ const maskPhone = (value: string) => {
     .replace(/(\d{2})(\d)/, "($1) $2") // Coloca o parênteses DDD
     .replace(/(\d{5})(\d)/, "$1-$2") // Coloca o hífen depois do 5º dígito
     .replace(/(-\d{4})\d+?$/, "$1"); // Impede de digitar mais que 15 caracteres
+};
+
+const gerarVariacoesTelefone = (telefone: string) => {
+  const telefoneLimpo = telefone.replace(/\D/g, "");
+  const variacoes = new Set<string>();
+  const numerosLocais = new Set<string>();
+
+  if (!telefoneLimpo) return [];
+
+  numerosLocais.add(telefoneLimpo);
+
+  if (telefoneLimpo.startsWith("55") && (telefoneLimpo.length === 12 || telefoneLimpo.length === 13)) {
+    numerosLocais.add(telefoneLimpo.slice(2));
+  }
+
+  numerosLocais.forEach((numero) => {
+    variacoes.add(numero);
+    variacoes.add(`55${numero}`);
+    variacoes.add(`+55${numero}`);
+
+    if (numero.length === 11) {
+      variacoes.add(`(${numero.slice(0, 2)}) ${numero.slice(2, 7)}-${numero.slice(7)}`);
+      variacoes.add(`+55 (${numero.slice(0, 2)}) ${numero.slice(2, 7)}-${numero.slice(7)}`);
+    }
+
+    if (numero.length === 10) {
+      variacoes.add(`(${numero.slice(0, 2)}) ${numero.slice(2, 6)}-${numero.slice(6)}`);
+      variacoes.add(`+55 (${numero.slice(0, 2)}) ${numero.slice(2, 6)}-${numero.slice(6)}`);
+    }
+  });
+
+  return Array.from(variacoes);
 };
 
 export default function AulaExperimentalPage() {
@@ -88,6 +119,7 @@ export default function AulaExperimentalPage() {
 
     try {
       const whatsappLimpo = formData.whatsapp.replace(/\D/g, "");
+      const telefonesBusca = gerarVariacoesTelefone(whatsappLimpo);
 
       const [{ data: perfilPorEmail, error: erroPerfilEmail }, { data: perfilPorWhatsapp, error: erroPerfilWhatsapp }] =
         await Promise.all([
@@ -99,7 +131,8 @@ export default function AulaExperimentalPage() {
           supabase
             .from("perfis")
             .select("id, tipo, whatsapp, email, permitir_nova_experimental")
-            .eq("whatsapp", whatsappLimpo)
+            .in("whatsapp", telefonesBusca)
+            .limit(1)
             .maybeSingle(),
         ]);
 
@@ -135,17 +168,21 @@ export default function AulaExperimentalPage() {
         throw new Error("Este contato já está vinculado a um perfil interno do sistema.");
       }
 
-      const perfilId = perfilExistente?.id || null;
+      let perfilId = perfilExistente?.id || null;
       const whatsappReferencia = perfilExistente?.whatsapp || whatsappLimpo;
 
       if (perfilId) {
+        const telefonesSolicitacao = Array.from(
+          new Set([formData.whatsapp, whatsappReferencia, ...telefonesBusca].filter(Boolean))
+        );
+
         const [{ data: solicitacaoEmAndamento, error: erroSolicitacaoAtiva }, { data: matriculaAtiva, error: erroMatriculaAtiva }] =
           await Promise.all([
             supabase
               .from("solicitacoes_aula_experimental")
               .select("id")
               .in("status", STATUS_SOLICITACOES_EM_ANDAMENTO)
-              .in("telefone_aluno", [formData.whatsapp, whatsappReferencia])
+              .in("telefone_aluno", telefonesSolicitacao)
               .limit(1)
               .maybeSingle(),
             supabase
@@ -200,9 +237,11 @@ export default function AulaExperimentalPage() {
           throw new Error("Não foi possível concluir a criação da conta agora.");
         }
 
+        perfilId = authData.user.id;
+
         const { error: perfilError } = await supabase.from("perfis").insert([
           {
-            id: authData.user.id,
+            id: perfilId,
             nome: formData.nome,
             whatsapp: whatsappLimpo,
             email: formData.email,
@@ -221,12 +260,13 @@ export default function AulaExperimentalPage() {
         }
       }
 
-      const { error: solicitacaoError } = await supabase
+      let { error: solicitacaoError } = await supabase
         .from("solicitacoes_aula_experimental")
         .insert([
           {
             nome_aluno: formData.nome,
-            telefone_aluno: formData.whatsapp,
+            perfil_id: perfilId,
+            telefone_aluno: whatsappLimpo,
             horarios_preferencia: formData.horarios_preferencia,
             professor_preferido_id: formData.professor_id || null,
             professor_responsavel_id: formData.professor_id || null,
@@ -234,6 +274,24 @@ export default function AulaExperimentalPage() {
             nivel_experiencia: formData.nivel_experiencia,
           },
         ]);
+
+      if (solicitacaoError?.message?.toLowerCase().includes("perfil_id")) {
+        const retry = await supabase
+          .from("solicitacoes_aula_experimental")
+          .insert([
+            {
+              nome_aluno: formData.nome,
+              telefone_aluno: whatsappLimpo,
+              horarios_preferencia: formData.horarios_preferencia,
+              professor_preferido_id: formData.professor_id || null,
+              professor_responsavel_id: formData.professor_id || null,
+              status: "pendente",
+              nivel_experiencia: formData.nivel_experiencia,
+            },
+          ]);
+
+        solicitacaoError = retry.error;
+      }
 
       if (solicitacaoError) {
         throw new Error("A solicitação não pôde ser registrada agora. Tente novamente em instantes.");

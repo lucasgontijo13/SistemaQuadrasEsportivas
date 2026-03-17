@@ -30,6 +30,9 @@ export interface Matricula {
   data_inicio?: string | null;
   status_pos_aceite?: 'ativo' | 'aguardando_dados' | 'aguardando_pagamento' | null;
   professor_indicacao_id?: string | null;
+  ultima_recusa_professor_id?: string | null;
+  ultima_recusa_observacao?: string | null;
+  ultima_recusa_em?: string | null;
   perfis?: Perfil; 
   turmas?: Turma; 
 }
@@ -125,6 +128,7 @@ export interface SolicitacaoAula {
   id: string;
   created_at: string;
   nome_aluno: string;
+  perfil_id?: string | null;
   telefone_aluno: string;
   data_nascimento?: string | null;
   horarios_preferencia: string;
@@ -147,6 +151,7 @@ export interface SolicitacaoAula {
     | 'agendado'
     | 'aprovada_para_matricula'
     | 'faltou'
+    | 'cancelado'
     | 'nao_vai_continuar'
     | 'matricula_em_andamento';
   nivel_experiencia?: string;

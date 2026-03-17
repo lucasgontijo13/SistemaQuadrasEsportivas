@@ -11,6 +11,47 @@ import {
 } from "@/types";
 
 const normalizarTelefone = (telefone: string) => telefone.replace(/\D/g, "");
+const gerarVariacoesTelefone = (telefone: string) => {
+  const telefoneLimpo = normalizarTelefone(telefone);
+  const variacoes = new Set<string>();
+  const numerosLocais = new Set<string>();
+
+  if (!telefoneLimpo) return [];
+
+  numerosLocais.add(telefoneLimpo);
+
+  if (telefoneLimpo.startsWith("55") && (telefoneLimpo.length === 12 || telefoneLimpo.length === 13)) {
+    numerosLocais.add(telefoneLimpo.slice(2));
+  }
+
+  numerosLocais.forEach((numero) => {
+    variacoes.add(numero);
+    variacoes.add(`55${numero}`);
+    variacoes.add(`+55${numero}`);
+
+    if (numero.length === 11) {
+      variacoes.add(`(${numero.slice(0, 2)}) ${numero.slice(2, 7)}-${numero.slice(7)}`);
+      variacoes.add(`+55 (${numero.slice(0, 2)}) ${numero.slice(2, 7)}-${numero.slice(7)}`);
+    }
+
+    if (numero.length === 10) {
+      variacoes.add(`(${numero.slice(0, 2)}) ${numero.slice(2, 6)}-${numero.slice(6)}`);
+      variacoes.add(`+55 (${numero.slice(0, 2)}) ${numero.slice(2, 6)}-${numero.slice(6)}`);
+    }
+  });
+
+  return Array.from(variacoes);
+};
+
+const mensagemErro = (error: unknown) =>
+  error && typeof error === "object" && "message" in error
+    ? String((error as { message?: unknown }).message || "")
+    : "";
+
+const colunaPerfilSolicitacaoIndisponivel = (error: unknown) => {
+  const message = mensagemErro(error).toLowerCase();
+  return message.includes("perfil_id") && message.includes("solicitacoes_aula_experimental");
+};
 const mapaDiaSemana: Record<string, number> = {
   Domingo: 0,
   Segunda: 1,
@@ -53,7 +94,6 @@ const statusMatriculasQueOcupamVaga: Matricula["status"][] = [
   "ativo",
   "aguardando_dados",
   "aguardando_pagamento",
-  "aguardando_aceite_professor",
 ];
 
 const statusMatriculasRegularesAtivas: Matricula["status"][] = [
@@ -68,17 +108,34 @@ const statusMatriculasExperimentaisReagendaveis: Matricula["status"][] = [
 ];
 
 const buscarResumoSolicitacao = async (solicitacaoId: string) => {
-  const { data, error } = await supabase
+  const selectComPerfilId =
+    "id, perfil_id, professor_preferido_id, professor_responsavel_id, professor_origem_transferencia_id, turma_sugerida_id, ultima_recusa_repasse_por_id, ultima_recusa_repasse_observacao, ultima_recusa_repasse_em, data_aula_experimental, resultado_experimental_em, status";
+  const selectLegado =
+    "id, professor_preferido_id, professor_responsavel_id, professor_origem_transferencia_id, turma_sugerida_id, ultima_recusa_repasse_por_id, ultima_recusa_repasse_observacao, ultima_recusa_repasse_em, data_aula_experimental, resultado_experimental_em, status";
+
+  let { data, error } = await supabase
     .from("solicitacoes_aula_experimental")
-    .select("id, professor_preferido_id, professor_responsavel_id, professor_origem_transferencia_id, turma_sugerida_id, ultima_recusa_repasse_por_id, ultima_recusa_repasse_observacao, ultima_recusa_repasse_em, data_aula_experimental, resultado_experimental_em, status")
+    .select(selectComPerfilId)
     .eq("id", solicitacaoId)
     .maybeSingle();
+
+  if (error && colunaPerfilSolicitacaoIndisponivel(error)) {
+    const retry = await supabase
+      .from("solicitacoes_aula_experimental")
+      .select(selectLegado)
+      .eq("id", solicitacaoId)
+      .maybeSingle();
+
+    data = retry.data ? { ...retry.data, perfil_id: null } : retry.data;
+    error = retry.error;
+  }
 
   if (error) throw new Error(error.message);
   if (!data) throw new Error("Solicitação de aula experimental não encontrada.");
 
   return data as {
     id: string;
+    perfil_id: string | null;
     professor_preferido_id: string | null;
     professor_responsavel_id: string | null;
     professor_origem_transferencia_id: string | null;
@@ -143,6 +200,7 @@ const enriquecerSolicitacao = (
     id: string;
     created_at: string;
     nome_aluno: string;
+    perfil_id?: string | null;
     telefone_aluno: string;
     data_nascimento?: string | null;
     horarios_preferencia: string;
@@ -164,6 +222,7 @@ const enriquecerSolicitacao = (
   id: solicitacao.id,
   created_at: solicitacao.created_at,
   nome_aluno: solicitacao.nome_aluno,
+  perfil_id: solicitacao.perfil_id || null,
   telefone_aluno: solicitacao.telefone_aluno,
   data_nascimento: solicitacao.data_nascimento || null,
   horarios_preferencia: solicitacao.horarios_preferencia,
@@ -197,10 +256,12 @@ async function buscarPerfilAlunoPorWhatsapp(
   telefoneLimpo: string,
   select: string
 ) {
+  const telefonesBusca = gerarVariacoesTelefone(telefoneLimpo);
+
   const { data, error } = await supabase
     .from("perfis")
     .select(select)
-    .eq("whatsapp", telefoneLimpo)
+    .in("whatsapp", telefonesBusca)
     .eq("tipo", "aluno")
     .limit(2);
 
@@ -219,6 +280,48 @@ async function buscarPerfilAlunoPorWhatsapp(
   }
 
   return perfis[0];
+}
+
+async function buscarPerfilAlunoPorId(perfilId: string, select: string) {
+  const { data, error } = await supabase
+    .from("perfis")
+    .select(select)
+    .eq("id", perfilId)
+    .eq("tipo", "aluno")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+
+  return (data as Record<string, unknown> | null) || null;
+}
+
+async function buscarPerfilAlunoDaSolicitacao(
+  solicitacao: { id: string; perfil_id?: string | null },
+  telefoneLimpo: string,
+  select: string
+) {
+  if (solicitacao.perfil_id) {
+    const perfilPorId = await buscarPerfilAlunoPorId(solicitacao.perfil_id, select);
+
+    if (perfilPorId) {
+      return perfilPorId;
+    }
+  }
+
+  const perfilPorWhatsapp = await buscarPerfilAlunoPorWhatsapp(telefoneLimpo, select);
+
+  if (perfilPorWhatsapp && !solicitacao.perfil_id && typeof perfilPorWhatsapp.id === "string") {
+    const { error } = await supabase
+      .from("solicitacoes_aula_experimental")
+      .update({ perfil_id: perfilPorWhatsapp.id })
+      .eq("id", solicitacao.id);
+
+    if (error && !colunaPerfilSolicitacaoIndisponivel(error)) {
+      console.error("Não foi possível vincular o perfil à solicitação experimental:", error);
+    }
+  }
+
+  return perfilPorWhatsapp;
 }
 
 export async function verificarPermissaoAdmin(): Promise<{ autorizado: boolean; tipo: string }> {
@@ -290,6 +393,9 @@ export async function buscarDadosPainel(
         data_inicio,
         status_pos_aceite,
         professor_indicacao_id,
+        ultima_recusa_professor_id,
+        ultima_recusa_observacao,
+        ultima_recusa_em,
         perfil_id,
         perfis:perfis!matriculas_perfil_id_fkey (
           ${selectPerfilResumo}
@@ -349,6 +455,9 @@ export async function buscarDadosPainel(
       data_inicio,
       status_pos_aceite,
       professor_indicacao_id,
+      ultima_recusa_professor_id,
+      ultima_recusa_observacao,
+      ultima_recusa_em,
       perfil_id,
       turma_id,
       perfis:perfis!matriculas_perfil_id_fkey (${selectPerfil}),
@@ -364,27 +473,13 @@ export async function buscarDadosPainel(
 
   if (tipoPerfil === "professor" && perfilId) {
     if (turmasVisiveisIds.length === 0) {
-      return {
-        turmas: [],
-        turmasParaFluxos:
-          ((turmasParaFluxosData as Array<{
-            id: number;
-            dia_semana: string;
-            horario: string;
-            nivel: string;
-            professor_id?: string | null;
-            vagas_totais: number;
-            ativa?: boolean | null;
-            matriculas?: Matricula[];
-          }> | null)?.map((turma) => enriquecerTurma(turma, professoresMap)) || []),
-        horariosQuadra: (quadrasData as HorarioQuadra[]) || [],
-        matriculas: [],
-        alunos: [],
-        professores,
-      };
+      matriculasQuery = matriculasQuery.eq("professor_indicacao_id", perfilId);
+    } else {
+      const listaTurmas = turmasVisiveisIds.join(",");
+      matriculasQuery = matriculasQuery.or(
+        `turma_id.in.(${listaTurmas}),professor_indicacao_id.eq.${perfilId}`
+      );
     }
-
-    matriculasQuery = matriculasQuery.in("turma_id", turmasVisiveisIds);
   }
 
   const { data: matriculasData, error: matriculasError } = await matriculasQuery;
@@ -470,19 +565,16 @@ export async function atualizarTurmasAluno({
   perfilId,
   nivel,
   turmasIds,
-  datasInicioPorTurma,
+  dataInicioPlano,
 }: {
   perfilId: string;
   nivel: string;
   turmasIds: number[];
-  datasInicioPorTurma: Record<number, string>;
+  dataInicioPlano: string;
 }) {
   if (!perfilId) throw new Error("Aluno não identificado para atualização.");
 
   const turmasUnicas = [...new Set(turmasIds)];
-  const datasInicioMap = new Map<number, string>(
-    Object.entries(datasInicioPorTurma).map(([turmaId, dataInicio]) => [Number(turmaId), dataInicio])
-  );
 
   const { error: perfilError } = await supabase
     .from("perfis")
@@ -525,6 +617,14 @@ export async function atualizarTurmasAluno({
     ativa: boolean | null;
   }> = [];
 
+  if (turmasUnicas.length > 0 && !dataInicioPlano) {
+    throw new Error("Defina a data de início do plano.");
+  }
+
+  if (dataInicioPlano && !dataNaoPodeSerPassado(dataInicioPlano)) {
+    throw new Error("Escolha uma data de início igual ou posterior a hoje.");
+  }
+
   if (turmasUnicas.length > 0) {
     const { data, error } = await supabase
       .from("turmas")
@@ -541,22 +641,9 @@ export async function atualizarTurmasAluno({
 
   for (const turmaId of turmasUnicas) {
     const turma = turmasMap.get(turmaId);
-    const dataInicio = datasInicioMap.get(turmaId);
 
     if (!turma || turma.ativa === false) {
       throw new Error("Uma das turmas selecionadas não está mais disponível.");
-    }
-
-    if (!dataInicio) {
-      throw new Error(`Defina a data de início da turma de ${turma.dia_semana}.`);
-    }
-
-    if (!dataCorrespondeAoDiaDaTurma(dataInicio, turma.dia_semana)) {
-      throw new Error(`A data da turma de ${turma.dia_semana} precisa cair no mesmo dia da semana.`);
-    }
-
-    if (!dataNaoPodeSerPassado(dataInicio)) {
-      throw new Error("Escolha datas de início iguais ou posteriores a hoje.");
     }
 
     const { count, error: lotacaoError } = await supabase
@@ -580,7 +667,6 @@ export async function atualizarTurmasAluno({
   }, new Map<number, typeof matriculasRegulares>());
 
   for (const turmaId of turmasUnicas) {
-    const dataInicio = datasInicioMap.get(turmaId) || null;
     const matriculasDaTurma = matriculasPorTurma.get(turmaId) || [];
     const matriculaPreferencial =
       matriculasDaTurma.find((matricula) => matricula.status !== "inativo") || matriculasDaTurma[0];
@@ -588,7 +674,15 @@ export async function atualizarTurmasAluno({
     if (matriculaPreferencial) {
       const { error } = await supabase
         .from("matriculas")
-        .update({ status: statusBase, data_inicio: dataInicio })
+        .update({
+          status: statusBase,
+          data_inicio: dataInicioPlano || null,
+          status_pos_aceite: null,
+          professor_indicacao_id: null,
+          ultima_recusa_professor_id: null,
+          ultima_recusa_observacao: null,
+          ultima_recusa_em: null,
+        })
         .eq("id", matriculaPreferencial.id);
 
       if (error) throw new Error(error.message);
@@ -597,7 +691,12 @@ export async function atualizarTurmasAluno({
 
     const { error } = await supabase
       .from("matriculas")
-      .insert([{ perfil_id: perfilId, turma_id: turmaId, status: statusBase, data_inicio: dataInicio }]);
+      .insert([{
+        perfil_id: perfilId,
+        turma_id: turmaId,
+        status: statusBase,
+        data_inicio: dataInicioPlano || null,
+      }]);
 
     if (error) throw new Error(error.message);
   }
@@ -787,12 +886,18 @@ export async function efetivarMatricula({
           data_inicio: dataInicioPlano,
           status_pos_aceite: statusDestino,
           professor_indicacao_id: professorSolicitanteId,
+          ultima_recusa_professor_id: null,
+          ultima_recusa_observacao: null,
+          ultima_recusa_em: null,
         }
       : {
           status: statusDestino,
           data_inicio: dataInicioPlano,
           status_pos_aceite: null,
           professor_indicacao_id: null,
+          ultima_recusa_professor_id: null,
+          ultima_recusa_observacao: null,
+          ultima_recusa_em: null,
         };
 
     if (matriculaDaTurma) {
@@ -855,7 +960,10 @@ export async function aceitarMatriculaPendenteProfessor(matriculaId: number, pro
       turma_id,
       turmas:turmas!inner (
         id,
-        professor_id
+        professor_id,
+        vagas_totais,
+        dia_semana,
+        horario
       )
     `)
     .eq("id", matriculaId)
@@ -872,6 +980,18 @@ export async function aceitarMatriculaPendenteProfessor(matriculaId: number, pro
     throw new Error("Você não pode aceitar uma matrícula de outra turma.");
   }
 
+  const { count, error: lotacaoError } = await supabase
+    .from("matriculas")
+    .select("*", { count: "exact", head: true })
+    .eq("turma_id", matricula.turma_id)
+    .in("status", statusMatriculasQueOcupamVaga)
+    .neq("id", matriculaId);
+
+  if (lotacaoError) throw new Error(lotacaoError.message);
+  if ((count ?? 0) >= turma.vagas_totais) {
+    throw new Error(`A turma de ${turma.dia_semana}, às ${turma.horario.substring(0, 5)} lotou antes do aceite.`);
+  }
+
   const statusFinal = (matricula.status_pos_aceite as Matricula["status"] | null) || "aguardando_pagamento";
   const { error: updateError } = await supabase
     .from("matriculas")
@@ -879,6 +999,9 @@ export async function aceitarMatriculaPendenteProfessor(matriculaId: number, pro
       status: statusFinal,
       status_pos_aceite: null,
       professor_indicacao_id: null,
+      ultima_recusa_professor_id: null,
+      ultima_recusa_observacao: null,
+      ultima_recusa_em: null,
     })
     .eq("id", matriculaId);
 
@@ -886,7 +1009,11 @@ export async function aceitarMatriculaPendenteProfessor(matriculaId: number, pro
   return true;
 }
 
-export async function recusarMatriculaPendenteProfessor(matriculaId: number, professorId: string) {
+export async function recusarMatriculaPendenteProfessor(
+  matriculaId: number,
+  professorId: string,
+  observacao: string
+) {
   const { data: matricula, error } = await supabase
     .from("matriculas")
     .select(`
@@ -907,6 +1034,11 @@ export async function recusarMatriculaPendenteProfessor(matriculaId: number, pro
     throw new Error("Esta matrícula não está aguardando aceite.");
   }
 
+  const observacaoNormalizada = observacao.trim();
+  if (!observacaoNormalizada) {
+    throw new Error("Adicione uma observação para recusar esta turma.");
+  }
+
   const turma = Array.isArray(matricula.turmas) ? matricula.turmas[0] : matricula.turmas;
   if (!turma || turma.professor_id !== professorId) {
     throw new Error("Você não pode recusar uma matrícula de outra turma.");
@@ -917,7 +1049,9 @@ export async function recusarMatriculaPendenteProfessor(matriculaId: number, pro
     .update({
       status: "inativo",
       status_pos_aceite: null,
-      professor_indicacao_id: null,
+      ultima_recusa_professor_id: professorId,
+      ultima_recusa_observacao: observacaoNormalizada,
+      ultima_recusa_em: new Date().toISOString(),
     })
     .eq("id", matriculaId);
 
@@ -1031,9 +1165,27 @@ export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: 
     ((professoresData as ProfessorResumo[]) || []).map((professor) => [professor.id, professor])
   );
 
-  let query = supabase
-    .from("solicitacoes_aula_experimental")
-    .select(`
+  const selectSolicitacoesComPerfil = `
+      id,
+      created_at,
+      nome_aluno,
+      perfil_id,
+      telefone_aluno,
+      horarios_preferencia,
+      professor_preferido_id,
+      professor_responsavel_id,
+      professor_origem_transferencia_id,
+      turma_sugerida_id,
+      ultima_recusa_repasse_por_id,
+      ultima_recusa_repasse_observacao,
+      ultima_recusa_repasse_em,
+      data_aula_experimental,
+      resultado_experimental_em,
+      status,
+      nivel_experiencia,
+      ultimo_contato_whatsapp_em
+    `;
+  const selectSolicitacoesLegado = `
       id,
       created_at,
       nome_aluno,
@@ -1051,7 +1203,10 @@ export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: 
       status,
       nivel_experiencia,
       ultimo_contato_whatsapp_em
-    `)
+    `;
+  let query = supabase
+    .from("solicitacoes_aula_experimental")
+    .select(selectSolicitacoesComPerfil)
     .in("status", statusSolicitacoesAtivas)
     .order("created_at", { ascending: false });
 
@@ -1061,10 +1216,33 @@ export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: 
     );
   }
 
-  const { data, error } = await query;
+  let { data, error } = await query;
+
+  if (error && colunaPerfilSolicitacaoIndisponivel(error)) {
+    let queryLegado = supabase
+      .from("solicitacoes_aula_experimental")
+      .select(selectSolicitacoesLegado)
+      .in("status", statusSolicitacoesAtivas)
+      .order("created_at", { ascending: false });
+
+    if (tipoPerfil === "professor") {
+      queryLegado = queryLegado.or(
+        `professor_responsavel_id.eq.${perfilId},and(professor_responsavel_id.is.null,professor_preferido_id.eq.${perfilId}),and(professor_responsavel_id.is.null,professor_preferido_id.is.null)`
+      );
+    }
+
+    const retry = await queryLegado;
+
+    data =
+      (retry.data as Array<Record<string, unknown>> | null)?.map((solicitacao) => ({
+        ...solicitacao,
+        perfil_id: null,
+      })) || null;
+    error = retry.error;
+  }
 
   if (error) {
-    console.error("Erro ao buscar solicitações:", error);
+    console.error("Erro ao buscar solicitações:", mensagemErro(error) || error);
     return [];
   }
 
@@ -1073,6 +1251,7 @@ export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: 
       id: string;
       created_at: string;
       nome_aluno: string;
+      perfil_id?: string | null;
       telefone_aluno: string;
       horarios_preferencia: string;
       professor_preferido_id?: string | null;
@@ -1099,22 +1278,51 @@ export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: 
   );
 
   const dataNascimentoPorTelefone = new Map<string, string | null>();
+  const dataNascimentoPorPerfil = new Map<string, string | null>();
+  const perfilIdsSolicitacoes = Array.from(
+    new Set(solicitacoesBrutas.map((solicitacao) => solicitacao.perfil_id).filter(Boolean))
+  ) as string[];
 
-  if (telefonesSolicitacoes.length > 0) {
-    const { data: perfisSolicitacoes, error: perfisSolicitacoesError } = await supabase
-      .from("perfis")
-      .select("whatsapp, data_nascimento")
-      .in("whatsapp", telefonesSolicitacoes);
+  if (telefonesSolicitacoes.length > 0 || perfilIdsSolicitacoes.length > 0) {
+    const telefonesBusca = Array.from(
+      new Set(telefonesSolicitacoes.flatMap((telefone) => gerarVariacoesTelefone(telefone)))
+    );
 
-    if (perfisSolicitacoesError) {
-      throw new Error(perfisSolicitacoesError.message);
+    if (telefonesBusca.length > 0) {
+      const { data: perfisPorTelefone, error: perfisPorTelefoneError } = await supabase
+        .from("perfis")
+        .select("id, whatsapp, data_nascimento")
+        .in("whatsapp", telefonesBusca);
+
+      if (perfisPorTelefoneError) {
+        throw new Error(perfisPorTelefoneError.message);
+      }
+
+      ((perfisPorTelefone as Array<{ id: string; whatsapp: string; data_nascimento: string | null }> | null) || []).forEach(
+        (perfil) => {
+          dataNascimentoPorPerfil.set(perfil.id, perfil.data_nascimento || null);
+          dataNascimentoPorTelefone.set(normalizarTelefone(perfil.whatsapp), perfil.data_nascimento || null);
+        }
+      );
     }
 
-    ((perfisSolicitacoes as Array<{ whatsapp: string; data_nascimento: string | null }> | null) || []).forEach(
-      (perfil) => {
-        dataNascimentoPorTelefone.set(normalizarTelefone(perfil.whatsapp), perfil.data_nascimento || null);
+    if (perfilIdsSolicitacoes.length > 0) {
+      const { data: perfisPorId, error: perfisPorIdError } = await supabase
+        .from("perfis")
+        .select("id, whatsapp, data_nascimento")
+        .in("id", perfilIdsSolicitacoes);
+
+      if (perfisPorIdError) {
+        throw new Error(perfisPorIdError.message);
       }
-    );
+
+      ((perfisPorId as Array<{ id: string; whatsapp: string; data_nascimento: string | null }> | null) || []).forEach(
+        (perfil) => {
+          dataNascimentoPorPerfil.set(perfil.id, perfil.data_nascimento || null);
+          dataNascimentoPorTelefone.set(normalizarTelefone(perfil.whatsapp), perfil.data_nascimento || null);
+        }
+      );
+    }
   }
 
   return (
@@ -1123,7 +1331,9 @@ export async function buscarSolicitacoesPendentes(perfilId: string, tipoPerfil: 
         {
           ...solicitacao,
           data_nascimento:
-            dataNascimentoPorTelefone.get(normalizarTelefone(solicitacao.telefone_aluno)) || null,
+            (solicitacao.perfil_id && dataNascimentoPorPerfil.get(solicitacao.perfil_id)) ||
+            dataNascimentoPorTelefone.get(normalizarTelefone(solicitacao.telefone_aluno)) ||
+            null,
         },
         professoresMap
       )
@@ -1328,11 +1538,14 @@ export async function registrarResultadoAulaExperimental({
 }: {
   solicitacaoId: string;
   telefoneAluno: string;
-  resultado: "aprovada_para_matricula" | "faltou" | "nao_vai_continuar";
+  resultado: "aprovada_para_matricula" | "faltou" | "nao_vai_continuar" | "cancelado";
 }) {
   const telefoneLimpo = normalizarTelefone(telefoneAluno);
+  const solicitacao = await buscarResumoSolicitacao(solicitacaoId);
 
-  const perfil = (await buscarPerfilAlunoPorWhatsapp(telefoneLimpo, "id")) as { id: string } | null;
+  const perfil = (await buscarPerfilAlunoDaSolicitacao(solicitacao, telefoneLimpo, "id")) as
+    | { id: string }
+    | null;
   if (!perfil) {
     throw new Error("Perfil do aluno não encontrado para registrar o resultado da aula experimental.");
   }
@@ -1343,6 +1556,20 @@ export async function registrarResultadoAulaExperimental({
       .update({ status: "pendente" })
       .eq("perfil_id", perfil.id)
       .eq("status", "experimental");
+
+    if (matriculasError) throw new Error(matriculasError.message);
+  }
+
+  if (resultado === "cancelado") {
+    const { error: matriculasError } = await supabase
+      .from("matriculas")
+      .update({
+        status: "inativo",
+        status_pos_aceite: null,
+        professor_indicacao_id: null,
+      })
+      .eq("perfil_id", perfil.id)
+      .in("status", ["experimental", "pendente"]);
 
     if (matriculasError) throw new Error(matriculasError.message);
   }
@@ -1402,11 +1629,11 @@ export async function agendarAulaExperimental({
   const dataInicioNormalizada = dataInicio;
   const solicitacao = await buscarResumoSolicitacao(solicitacaoId);
 
-  const perfil = (await buscarPerfilAlunoPorWhatsapp(telefoneLimpo, "id, nome")) as
+  const perfil = (await buscarPerfilAlunoDaSolicitacao(solicitacao, telefoneLimpo, "id, nome")) as
     | { id: string; nome: string }
     | null;
   if (!perfil) {
-    throw new Error("Perfil do aluno não encontrado. Confirme o WhatsApp cadastrado antes de agendar.");
+    throw new Error("Perfil do aluno não encontrado. Essa solicitação pode ser antiga e não estar vinculada a um cadastro válido.");
   }
 
   const { data: turma, error: turmaError } = await supabase
@@ -1484,10 +1711,11 @@ export async function agendarAulaExperimental({
     if (insertError) throw new Error(insertError.message);
   }
 
-  const { error: solicitacaoError } = await supabase
+  let { error: solicitacaoError } = await supabase
     .from("solicitacoes_aula_experimental")
     .update({
       status: "agendado",
+      perfil_id: perfil.id,
       professor_responsavel_id: professorResponsavelEfetivo,
       professor_origem_transferencia_id: null,
       turma_sugerida_id: null,
@@ -1498,6 +1726,25 @@ export async function agendarAulaExperimental({
       resultado_experimental_em: null,
     })
     .eq("id", solicitacaoId);
+
+  if (solicitacaoError && colunaPerfilSolicitacaoIndisponivel(solicitacaoError)) {
+    const retry = await supabase
+      .from("solicitacoes_aula_experimental")
+      .update({
+        status: "agendado",
+        professor_responsavel_id: professorResponsavelEfetivo,
+        professor_origem_transferencia_id: null,
+        turma_sugerida_id: null,
+        ultima_recusa_repasse_por_id: null,
+        ultima_recusa_repasse_observacao: null,
+        ultima_recusa_repasse_em: null,
+        data_aula_experimental: dataInicioNormalizada,
+        resultado_experimental_em: null,
+      })
+      .eq("id", solicitacaoId);
+
+    solicitacaoError = retry.error;
+  }
 
   if (solicitacaoError) throw new Error(solicitacaoError.message);
 
