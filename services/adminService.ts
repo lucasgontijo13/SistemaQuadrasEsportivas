@@ -83,7 +83,6 @@ const dataNaoPodeSerPassado = (data: string) => {
 const statusSolicitacoesAtivas: SolicitacaoAula["status"][] = [
   "pendente",
   "aguardando_aceite_professor",
-  "em_contato",
   "agendado",
   "faltou",
   "aprovada_para_matricula",
@@ -101,11 +100,25 @@ const statusMatriculasRegularesAtivas: Matricula["status"][] = [
   "aguardando_dados",
   "aguardando_pagamento",
 ];
+const statusMatriculasRegularesEmAndamento: Matricula["status"][] = [
+  ...statusMatriculasRegularesAtivas,
+  "aguardando_aceite_professor",
+];
 
 const statusMatriculasExperimentaisReagendaveis: Matricula["status"][] = [
   "experimental",
   "pendente",
 ];
+
+const perfilTemCadastroCompleto = (
+  perfil?: Pick<Perfil, "cpf" | "data_nascimento" | "contato_emergencia" | "cep" | "rua" | "numero"> | null
+) =>
+  !!perfil?.cpf &&
+  !!perfil?.data_nascimento &&
+  !!perfil?.contato_emergencia &&
+  !!perfil?.cep &&
+  !!perfil?.rua &&
+  !!perfil?.numero;
 
 const buscarResumoSolicitacao = async (solicitacaoId: string) => {
   const selectComPerfilId =
@@ -159,7 +172,6 @@ const solicitacaoExigeProfessorPreferido = (solicitacao: {
 
 const enriquecerProfessor = (
   professorId: string | null | undefined,
-  professorLegado: string | null | undefined,
   professoresMap: Map<string, ProfessorResumo>
 ) => {
   const professor = professorId ? professoresMap.get(professorId) || null : null;
@@ -167,7 +179,6 @@ const enriquecerProfessor = (
   return {
     professor_id: professorId || null,
     professor: professor || null,
-    professor_legado: professorLegado || professor?.nome || null,
   };
 };
 
@@ -192,7 +203,7 @@ const enriquecerTurma = (
   vagas_totais: turma.vagas_totais,
   ativa: turma.ativa ?? true,
   matriculas: turma.matriculas || [],
-  ...enriquecerProfessor(turma.professor_id, turma.professor, professoresMap),
+  ...enriquecerProfessor(turma.professor_id, professoresMap),
 });
 
 const enriquecerSolicitacao = (
@@ -361,7 +372,8 @@ export async function buscarDadosPainel(
 ) {
   const selectPerfilBase =
     "id, nome, email, whatsapp, tipo, nivel, permitir_nova_experimental, data_nascimento, contato_emergencia, sexo, necessidade_especial, objetivo";
-  const selectPerfil = tipoPerfil === "admin" ? `${selectPerfilBase}, cpf` : selectPerfilBase;
+  const selectPerfilAdmin = `${selectPerfilBase}, cpf, cep, rua, numero`;
+  const selectPerfil = tipoPerfil === "admin" ? selectPerfilAdmin : selectPerfilBase;
   const selectPerfilResumoBase = "id, nome, nivel, whatsapp, data_nascimento, contato_emergencia";
   const selectPerfilResumo =
     tipoPerfil === "admin" ? `${selectPerfilResumoBase}, cpf` : selectPerfilResumoBase;
@@ -599,7 +611,8 @@ export async function atualizarTurmasAluno({
     }>) || [];
 
   const matriculasRegulares = matriculasAluno.filter(
-    (matricula) => !["experimental", "pendente"].includes(matricula.status)
+    (matricula) =>
+      !["experimental", "pendente", "aguardando_aceite_professor"].includes(matricula.status)
   );
   const matriculasRegularesAtivas = matriculasRegulares.filter(
     (matricula) => matricula.status !== "inativo"
@@ -787,7 +800,6 @@ export async function efetivarMatricula({
   perfilId,
   turmasIds,
   nivel,
-  cadastroCompleto,
   dataInicioPlano,
   solicitacaoId,
   tipoPerfil,
@@ -797,7 +809,6 @@ export async function efetivarMatricula({
   perfilId: string;
   turmasIds: number[];
   nivel: string;
-  cadastroCompleto: boolean;
   dataInicioPlano: string;
   solicitacaoId?: string | null;
   tipoPerfil: string;
@@ -807,7 +818,6 @@ export async function efetivarMatricula({
   if (turmasIds.length === 0) throw new Error("Selecione pelo menos uma turma para efetivar o aluno.");
   if (!dataInicioPlano) throw new Error("Defina a data de início do plano.");
 
-  const statusDestino: Matricula["status"] = cadastroCompleto ? "aguardando_pagamento" : "aguardando_dados";
   const turmasUnicas = [...new Set(turmasIds)];
 
   if (!dataNaoPodeSerPassado(dataInicioPlano)) {
@@ -820,6 +830,20 @@ export async function efetivarMatricula({
     .eq("id", perfilId);
 
   if (perfilError) throw new Error(perfilError.message);
+
+  const { data: perfilAluno, error: perfilAlunoError } = await supabase
+    .from("perfis")
+    .select("cpf, data_nascimento, contato_emergencia, cep, rua, numero")
+    .eq("id", perfilId)
+    .maybeSingle();
+
+  if (perfilAlunoError) throw new Error(perfilAlunoError.message);
+
+  const statusDestino: Matricula["status"] = perfilTemCadastroCompleto(
+    perfilAluno as Pick<Perfil, "cpf" | "data_nascimento" | "contato_emergencia" | "cep" | "rua" | "numero"> | null
+  )
+    ? "aguardando_pagamento"
+    : "aguardando_dados";
 
   const { data: matriculasExistentes, error: buscarMatriculasError } = await supabase
     .from("matriculas")
@@ -1066,6 +1090,22 @@ export async function atualizarPerfil(perfilId: string, dados: Partial<Perfil>) 
 }
 
 export async function atualizarPermissaoNovaExperimental(perfilId: string, permitir: boolean) {
+  if (permitir) {
+    const { data: matriculaEmAndamento, error: matriculaError } = await supabase
+      .from("matriculas")
+      .select("id")
+      .eq("perfil_id", perfilId)
+      .in("status", statusMatriculasRegularesEmAndamento)
+      .limit(1)
+      .maybeSingle();
+
+    if (matriculaError) throw new Error(matriculaError.message);
+
+    if (matriculaEmAndamento) {
+      throw new Error("O aluno ainda tem matrícula em andamento. Remova os horários atuais antes de liberar outra aula experimental.");
+    }
+  }
+
   const { error } = await supabase
     .from("perfis")
     .update({ permitir_nova_experimental: permitir })

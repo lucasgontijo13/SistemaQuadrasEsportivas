@@ -1,6 +1,13 @@
 import { supabase } from "@/lib/supabase";
 import { Matricula } from "@/types";
 
+const STATUS_AGENDA_VISIVEIS: Matricula["status"][] = [
+  "experimental",
+  "ativo",
+  "aguardando_dados",
+  "aguardando_pagamento",
+];
+
 export async function buscarMinhaAgenda(): Promise<Matricula[]> {
   // 1. Obtém a sessão do utilizador
   const { data: { session } } = await supabase.auth.getSession();
@@ -34,13 +41,25 @@ export async function buscarMinhaAgenda(): Promise<Matricula[]> {
         )
       )
     `)
-    .eq('perfil_id', session.user.id);
+    .eq('perfil_id', session.user.id)
+    .in("status", STATUS_AGENDA_VISIVEIS);
 
   if (error) {
     console.error("Erro ao buscar agenda:", error);
     return [];
   }
 
-  // Forçamos a tipagem para Matricula[] usando unknown como ponte
-  return (data as unknown as Matricula[]) || [];
+  const matriculas = (data as unknown as Matricula[]) || [];
+
+  return matriculas.map((matricula) => ({
+    ...matricula,
+    turmas: matricula.turmas
+      ? {
+          ...matricula.turmas,
+          matriculas: matricula.turmas.matriculas?.filter((colega) =>
+            STATUS_AGENDA_VISIVEIS.includes(colega.status)
+          ),
+        }
+      : matricula.turmas,
+  }));
 }

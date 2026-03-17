@@ -17,6 +17,16 @@ export interface Perfil {
   objetivo?: string;
 }
 
+export interface DadosCompletarPerfil {
+  cpf: string;
+  data_nascimento: string;
+  cep: string;
+  rua: string;
+  numero: string;
+  contato_emergencia: string;
+  senha?: string;
+}
+
 export interface ProfessorResumo {
   id: string;
   nome: string;
@@ -44,7 +54,6 @@ export interface Turma {
   nivel: string;
   professor_id: string | null;
   professor?: ProfessorResumo | null;
-  professor_legado?: string | null;
   vagas_totais: number;
   ativa?: boolean;
   matriculas?: Matricula[];
@@ -86,32 +95,6 @@ export interface DiaSeletor {
   dataVisual: string;
 }
 
-export interface Perfil {
-  id: string;
-  nome: string;
-  email: string;
-  whatsapp: string;
-  tipo: 'aluno' | 'professor' | 'admin';
-  nivel?: string;
-  permitir_nova_experimental?: boolean;
-  cpf?: string;
-  data_nascimento?: string;
-  contato_emergencia?: string;
-  cep?: string;
-  rua?: string;
-  numero?: string;
-}
-
-export interface DadosCompletarPerfil {
-  senha?: string;
-  cpf: string;
-  data_nascimento: string;
-  cep: string;
-  rua: string;
-  numero: string;
-  contato_emergencia: string;
-}
-
 export interface DadosLogin {
   identificador: string; // Pode ser e-mail ou WhatsApp
   senha: string;
@@ -147,7 +130,6 @@ export interface SolicitacaoAula {
   status:
     | 'pendente'
     | 'aguardando_aceite_professor'
-    | 'em_contato'
     | 'agendado'
     | 'aprovada_para_matricula'
     | 'faltou'

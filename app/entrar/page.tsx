@@ -1,18 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Mail, Lock, Loader2, ArrowRight, AlertCircle, Phone } from "lucide-react";
 import { iniciarSessao } from "@/services/authService";
+import { supabase } from "@/lib/supabase";
 
 export default function LoginPage() {
   const router = useRouter();
   const [identificador, setIdentificador] = useState("");
   const [senha, setSenha] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    let ativo = true;
+
+    const verificarSessao = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!ativo) return;
+
+      if (session?.user) {
+        router.replace("/");
+        return;
+      }
+
+      setVerificandoSessao(false);
+    };
+
+    verificarSessao();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        router.replace("/");
+      } else if (ativo) {
+        setVerificandoSessao(false);
+      }
+    });
+
+    return () => {
+      ativo = false;
+      subscription.unsubscribe();
+    };
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +67,14 @@ export default function LoginPage() {
       setCarregando(false);
     }
   };
+
+  if (verificandoSessao) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-orange-500 selection:text-white relative">

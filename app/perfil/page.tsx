@@ -12,6 +12,14 @@ import { buscarPerfilUsuario, atualizarPerfilUsuario } from "@/services/perfilSe
 // Funções de Máscara (permanecem na UI para formatação em tempo real)
 const maskCPF = (v: string) => v.replace(/\D/g, "").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})/, "$1-$2").replace(/(-\d{2})\d+?$/, "$1");
 const maskPhone = (v: string) => v.replace(/\D/g, "").replace(/(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2").replace(/(-\d{4})\d+?$/, "$1");
+const maskCEP = (v: string) => v.replace(/\D/g, "").replace(/(\d{5})(\d)/, "$1-$2").replace(/(-\d{3})\d+?$/, "$1");
+const perfilEstaCompleto = (dados: Perfil) =>
+  !!dados.cpf &&
+  !!dados.data_nascimento &&
+  !!dados.contato_emergencia &&
+  !!dados.cep &&
+  !!dados.rua &&
+  !!dados.numero;
 
 // ADICIONE ESTA FUNÇÃO AQUI:
 const validarCPF = (cpf: string) => {
@@ -49,12 +57,13 @@ export default function PerfilPage() {
         if (!dados) {
           router.push("/entrar");
         } else {
-          setPendenciaBanco(!dados.cpf || !dados.data_nascimento || !dados.contato_emergencia);
+          setPendenciaBanco(!perfilEstaCompleto(dados));
           setPerfil({
             ...dados,
             whatsapp: maskPhone(dados.whatsapp || ""),
             contato_emergencia: maskPhone(dados.contato_emergencia || ""),
-            cpf: maskCPF(dados.cpf || "")
+            cpf: maskCPF(dados.cpf || ""),
+            cep: maskCEP(dados.cep || ""),
           });
         }
       } catch {
@@ -86,7 +95,7 @@ export default function PerfilPage() {
       window.dispatchEvent(new Event("perfilAtualizado"));
       
       setMensagem({ tipo: "sucesso", texto: "Perfil atualizado com sucesso!" });
-      setPendenciaBanco(!perfil.cpf || !perfil.data_nascimento || !perfil.contato_emergencia);
+      setPendenciaBanco(!perfilEstaCompleto(perfil));
       setTimeout(() => setMensagem({ tipo: "", texto: "" }), 3000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao salvar perfil.";
@@ -129,7 +138,7 @@ export default function PerfilPage() {
             <div>
               <h3 className="font-bold text-orange-400 text-lg">Cadastro Incompleto</h3>
               <p className="text-sm text-slate-300 mt-1 leading-relaxed">
-                Complete os dados de CPF, Nascimento e Emergência para validar sua matrícula.
+                Complete CPF, nascimento, emergência e endereço para validar sua matrícula.
               </p>
             </div>
           </div>
@@ -197,6 +206,44 @@ export default function PerfilPage() {
             <div>
               <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Nascimento</label>
               <input type="date" required className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500" value={perfil.data_nascimento || ""} onChange={e => setPerfil({...perfil, data_nascimento: e.target.value})} />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">CEP</label>
+              <input
+                type="text"
+                required
+                placeholder="00000-000"
+                minLength={9}
+                maxLength={9}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500"
+                value={perfil.cep || ""}
+                onChange={e => setPerfil({ ...perfil, cep: maskCEP(e.target.value) })}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Número</label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: 123"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500"
+                value={perfil.numero || ""}
+                onChange={e => setPerfil({ ...perfil, numero: e.target.value })}
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2 block">Rua</label>
+              <input
+                type="text"
+                required
+                placeholder="Rua, avenida ou praça"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500"
+                value={perfil.rua || ""}
+                onChange={e => setPerfil({ ...perfil, rua: e.target.value })}
+              />
             </div>
 
             <div className="sm:col-span-2">

@@ -17,6 +17,7 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const isHome = pathname === "/";
+  const isAdminRoute = pathname.startsWith("/admin");
   const menuRef = useRef<HTMLDivElement | null>(null);
   const notificacaoRef = useRef<HTMLDivElement | null>(null);
 
@@ -119,6 +120,13 @@ export function Navbar() {
     router.push("/entrar");
   };
 
+  const painelLabel =
+    perfil?.tipo === "admin"
+      ? "Painel Admin"
+      : perfil?.tipo === "professor"
+        ? "Painel Professor"
+        : "Painel";
+
   return (
     <motion.header 
       initial={{ y: -100, opacity: 0 }}
@@ -132,7 +140,14 @@ export function Navbar() {
         <div className="flex-1">
           {!isHome && (
             <button 
-              onClick={() => router.back()}
+              onClick={() => {
+                if (isAdminRoute) {
+                  router.push("/");
+                  return;
+                }
+
+                router.back();
+              }}
               className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors group"
             >
               <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
@@ -149,26 +164,11 @@ export function Navbar() {
         </Link>
 
         {/* LADO DIREITO: Menu e Ações */}
-        <div className="flex-1 flex justify-end gap-2 sm:gap-4 items-center">
+        <div className="flex-1 flex justify-end gap-2 sm:gap-3 items-center">
           {carregando ? (
             <Loader2 className="w-5 h-5 animate-spin text-slate-500" />
           ) : usuarioLogado && perfil ? (
-            <div className="flex items-center gap-3">
-              {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
-                <Link 
-                  href="/admin" 
-                  onClick={() => {
-                    setMenuAberto(false);
-                    setNotificacaoAberta(false);
-                  }}
-                  className="flex items-center justify-center gap-2 bg-slate-900 border border-slate-800 px-3 sm:px-4 py-2 rounded-full text-sm font-bold text-slate-300 hover:text-white hover:border-slate-700 transition-all min-w-10"
-                  aria-label="Painel Admin"
-                >
-                  <ShieldCheck className="w-4 h-4 text-orange-500" />
-                  <span className="hidden sm:inline">Painel Admin</span>
-                </Link>
-              )}
-
+            <div className="flex items-center gap-2 sm:gap-3">
               <div className="relative" ref={menuRef}>
                 <button 
                   onClick={() => {
@@ -197,6 +197,18 @@ export function Navbar() {
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
                       className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-2"
                     >
+                      {(perfil.tipo === 'admin' || perfil.tipo === 'professor') && (
+                        <>
+                          <Link
+                            href="/admin"
+                            onClick={() => setMenuAberto(false)}
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                          >
+                            <ShieldCheck className="w-4 h-4" /> {painelLabel}
+                          </Link>
+                          <div className="h-px bg-slate-800 my-2"></div>
+                        </>
+                      )}
                       <Link href="/agenda" onClick={() => setMenuAberto(false)} className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors">
                         <CalendarDays className="w-4 h-4" /> Minha Agenda
                       </Link>

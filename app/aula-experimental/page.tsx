@@ -15,7 +15,6 @@ interface Professor {
 const STATUS_SOLICITACOES_EM_ANDAMENTO = [
   "pendente",
   "aguardando_aceite_professor",
-  "em_contato",
   "agendado",
   "faltou",
   "aprovada_para_matricula",
