@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Users, CheckCircle2, Loader2, CalendarDays, Plus, 
@@ -132,6 +132,7 @@ type AdminDashboardProps = {
 type FiltroAtencaoSolicitacoes = "sem_responsavel" | "aguardando_aceite" | null;
 type FiltroCategoriaAlunos = "todos" | "matriculados" | "experimentais" | "inativos";
 type FiltroStatusSolicitacoesAdmin = "todos" | "sem_responsavel" | "com_responsavel" | "aguardando_aceite";
+type FiltroTipoSolicitacao = "todos" | "experimental" | "matricula";
 
 const statusSolicitacoesExperimentaisAtivas: SolicitacaoAula["status"][] = [
   "agendado",
@@ -152,6 +153,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const [turmasParaFluxos, setTurmasParaFluxos] = useState<Turma[]>([]);
   const [horariosQuadra, setHorariosQuadra] = useState<HorarioQuadra[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const conteudoModalPrincipalRef = useRef<HTMLFormElement | null>(null);
 
   const [modalAberto, setModalAberto] = useState(false);
   const [modalTransferenciaAberto, setModalTransferenciaAberto] = useState(false);
@@ -208,6 +210,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const [buscaSolicitacoes, setBuscaSolicitacoes] = useState("");
   const [filtroProfessorSolicitacoes, setFiltroProfessorSolicitacoes] = useState("todos");
   const [filtroStatusSolicitacoesAdmin, setFiltroStatusSolicitacoesAdmin] = useState<FiltroStatusSolicitacoesAdmin>("todos");
+  const [filtroTipoSolicitacao, setFiltroTipoSolicitacao] = useState<FiltroTipoSolicitacao>("todos");
   const [buscaAlunos, setBuscaAlunos] = useState("");
   const [filtroProfessorAlunos, setFiltroProfessorAlunos] = useState("todos");
   const [buscaMatriculados, setBuscaMatriculados] = useState("");
@@ -398,6 +401,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const solicitacaoTemProfessorEscolhido = (solicitacao?: SolicitacaoAula | null) =>
     !!solicitacao?.professor_preferido_id;
 
+  const solicitacaoEhMatriculaDireta = (solicitacao?: SolicitacaoAula | null) =>
+    (solicitacao?.tipo_solicitacao || "experimental") === "matricula";
+
   const obterNomeProfessorEscolhido = (solicitacao?: SolicitacaoAula | null) =>
     solicitacao?.professor_preferido?.nome ||
     buscarNomeProfessorPorId(solicitacao?.professor_preferido_id) ||
@@ -421,6 +427,16 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
   const obterLabelStatusSolicitacao = (solicitacao?: SolicitacaoAula | null) => {
     if (!solicitacao) return "Novo";
+    if (solicitacaoEhMatriculaDireta(solicitacao)) {
+      if (solicitacao.status === "matricula_em_andamento") return "Matrícula iniciada";
+      if (solicitacao.status === "aguardando_aceite_professor") {
+        return solicitacao.professor_responsavel_id === usuarioLogadoId
+          ? "Aguardando seu aceite"
+          : "Aguardando aceite";
+      }
+      if (!solicitacao.professor_responsavel_id) return "Nova matrícula";
+      return "Em atendimento";
+    }
     if (solicitacao.status === "agendado") {
       return dataJaChegou(solicitacao.data_aula_experimental) ? "Aguardando resultado" : "Aula marcada";
     }
@@ -452,6 +468,20 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
   const obterDescricaoStatusSolicitacao = (solicitacao?: SolicitacaoAula | null) => {
     if (!solicitacao) return "";
+    if (solicitacaoEhMatriculaDireta(solicitacao)) {
+      if (solicitacao.status === "matricula_em_andamento") {
+        return "O plano desse aluno já foi iniciado a partir da solicitação de matrícula.";
+      }
+      if (solicitacao.status === "aguardando_aceite_professor") {
+        return solicitacao.professor_responsavel_id === usuarioLogadoId
+          ? "Revise os dados do aluno antes de aceitar ou recusar o repasse."
+          : `Aguardando resposta de ${obterNomeProfessorResponsavel(solicitacao)}.`;
+      }
+      if (!solicitacao.professor_responsavel_id) {
+        return "O aluno pediu matrícula ou retorno e ainda aguarda o primeiro professor iniciar o atendimento.";
+      }
+      return "Essa solicitação já está em atendimento e pode seguir direto para a montagem do plano.";
+    }
     if (solicitacao.status === "agendado") {
       return dataJaChegou(solicitacao.data_aula_experimental)
         ? "A aula experimental ja aconteceu. Agora voce pode registrar o resultado e decidir se o aluno segue para a matricula."
@@ -464,7 +494,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       return "O fluxo foi encerrado sem consumir a aula experimental.";
     }
     if (solicitacao.status === "aprovada_para_matricula") {
-      return "O aluno quer continuar. Defina agora as turmas reais e a data de inicio do plano.";
+      return "O aluno quer continuar. Escolha agora as turmas reais do plano.";
     }
     if (solicitacao.status === "nao_vai_continuar") {
       return "O fluxo experimental foi encerrado para este aluno.";
@@ -600,8 +630,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       turmasEditaveisAluno[0] ||
       null;
     const dataInicioPlanoAtual =
-      matriculasRegularesAtivas.find((item) => !!item.data_inicio)?.data_inicio ||
-      formatarDataISO(new Date());
+      matriculasRegularesAtivas.find((item) => !!item.data_inicio)?.data_inicio || "";
 
     setAlunoSelecionado(matricula);
     setNivelEdicao(matricula.perfis?.nivel || "Iniciante");
@@ -716,13 +745,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     });
   };
 
-  const atualizarDataInicioEfetivacao = (dataInicio: string) => {
-    setDadosEfetivacao((prev) => ({
-      ...prev,
-      dataInicioPlano: dataInicio,
-    }));
-  };
-
   const toggleTurmaEdicaoAluno = (idTurma: number) => {
     setDadosEdicaoAluno((prev) => {
       const jaSelecionado = prev.turmasIds.includes(idTurma);
@@ -732,13 +754,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         turmasIds: jaSelecionado ? prev.turmasIds.filter((id) => id !== idTurma) : [...prev.turmasIds, idTurma],
       };
     });
-  };
-
-  const atualizarDataInicioEdicaoAluno = (dataInicio: string) => {
-    setDadosEdicaoAluno((prev) => ({
-      ...prev,
-      dataInicioPlano: dataInicio,
-    }));
   };
 
   const salvarDados = async (e: React.FormEvent) => {
@@ -760,10 +775,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       }
       else if (tipoModal === "editar_horarios_aluno" && alunoSelecionado?.perfil_id) {
         const totalTurmasSelecionadas = dadosEdicaoAluno.turmasIds.length;
-        if (totalTurmasSelecionadas > 0 && !dadosEdicaoAluno.dataInicioPlano) {
-          throw new Error("Defina a data de início do plano.");
-        }
-
         const atualizacaoAluno = await atualizarTurmasAluno({
           perfilId: alunoSelecionado.perfil_id,
           nivel: nivelEdicao,
@@ -935,7 +946,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     }
 
     const foneLimpo = solicitacao.telefone_aluno.replace(/\D/g, '');
-    const mensagem = `Olá, ${solicitacao.nome_aluno}! Vi que você solicitou uma Aula Experimental de Futevôlei com a gente. Vamos agendar?`;
+    const mensagem = solicitacaoEhMatriculaDireta(solicitacao)
+      ? `Olá, ${solicitacao.nome_aluno}! Vi que você pediu matrícula para voltar a treinar com a gente. Vamos alinhar os horários?`
+      : `Olá, ${solicitacao.nome_aluno}! Vi que você solicitou uma Aula Experimental de Futevôlei com a gente. Vamos agendar?`;
     const agora = new Date().toISOString();
     await registrarTentativaContatoSolicitacao(solicitacao.id);
     await carregarSolicitacoes();
@@ -1007,6 +1020,25 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   };
 
   const seguirParaMatricula = async (solicitacao: SolicitacaoAula) => {
+    if (solicitacaoEhMatriculaDireta(solicitacao)) {
+      setErroModal("");
+      setDadosEfetivacao({
+        matriculaId: 0,
+        perfilId: solicitacao.perfil_id || dadosExtrasAluno?.id || "",
+        nomeAluno: dadosExtrasAluno?.nome || solicitacao.nome_aluno,
+        nivel: dadosExtrasAluno?.nivel || solicitacao.nivel_experiencia || "Iniciante",
+        turmasIds: [],
+        dataInicioPlano: "",
+        solicitacaoId: solicitacao.id,
+      });
+      setDiaFiltroModal(obterTurmasFluxo()[0]?.dia_semana || "Segunda");
+      setTipoModal("efetivar_aluno");
+      setModalAgendamentoAberto(false);
+      setModalTransferenciaAberto(false);
+      setModalAberto(true);
+      return;
+    }
+
     const matriculaExperimental = encontrarMatriculaExperimentalDaSolicitacao(solicitacao);
 
     if (!matriculaExperimental) {
@@ -1033,15 +1065,13 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
         obterTurmasFluxo().find((turma) => turma.id === matriculaExperimental.turma_id) ||
         turmas.find((turma) => turma.id === matriculaExperimental.turma_id) ||
         null;
-      const dataInicial = matriculaExperimental.data_inicio || obterProximaDataDaTurma(turmaInicial);
-
       setDadosEfetivacao({
         matriculaId: matriculaExperimental.id,
         perfilId: matriculaExperimental.perfil_id || p?.id || "",
         nomeAluno: p?.nome || solicitacao.nome_aluno,
         nivel: p?.nivel || solicitacao.nivel_experiencia || "Iniciante",
         turmasIds: [matriculaExperimental.turma_id],
-        dataInicioPlano: dataInicial || "",
+        dataInicioPlano: "",
         solicitacaoId: solicitacao.id,
       });
       setDiaFiltroModal(turmaInicial?.dia_semana || obterTurmasFluxo()[0]?.dia_semana || "Segunda");
@@ -1425,21 +1455,24 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const idadeAlunoSolicitacao = calcularIdade(
     dadosExtrasAluno?.data_nascimento || solicitacaoSelecionada?.data_nascimento || null
   );
+  const solicitacaoSelecionadaEhMatriculaDireta = solicitacaoEhMatriculaDireta(solicitacaoSelecionada);
   const matriculaExperimentalDaSolicitacao = solicitacaoSelecionada
-    ? encontrarMatriculaExperimentalDaSolicitacao(solicitacaoSelecionada)
+    ? solicitacaoSelecionadaEhMatriculaDireta
+      ? null
+      : encontrarMatriculaExperimentalDaSolicitacao(solicitacaoSelecionada)
     : null;
-  const solicitacaoAulaMarcada = solicitacaoSelecionada?.status === "agendado";
+  const solicitacaoAulaMarcada =
+    !solicitacaoSelecionadaEhMatriculaDireta && solicitacaoSelecionada?.status === "agendado";
   const solicitacaoAguardandoResultado =
     solicitacaoAulaMarcada && dataJaChegou(solicitacaoSelecionada?.data_aula_experimental);
-  const solicitacaoFaltou = solicitacaoSelecionada?.status === "faltou";
+  const solicitacaoFaltou =
+    !solicitacaoSelecionadaEhMatriculaDireta && solicitacaoSelecionada?.status === "faltou";
   const solicitacaoProntaParaMatricula =
+    solicitacaoSelecionadaEhMatriculaDireta ||
     solicitacaoSelecionada?.status === "aprovada_para_matricula";
   const turmasSelecionadasEfetivacao = obterTurmasFluxo().filter((turma) =>
     dadosEfetivacao.turmasIds.includes(turma.id)
   );
-  const dataInicioPlanoValida =
-    !!dadosEfetivacao.dataInicioPlano &&
-    new Date(`${dadosEfetivacao.dataInicioPlano}T12:00:00`) >= new Date(`${dataMinimaAgendamento}T00:00:00`);
   const turmasEfetivacaoDiretas = turmasSelecionadasEfetivacao.filter(
     (turma) =>
       tipoLogado === "admin" ||
@@ -1513,9 +1546,6 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
   const turmasSelecionadasEdicaoAluno = turmasEditaveisAluno.filter((turma) =>
     dadosEdicaoAluno.turmasIds.includes(turma.id)
   );
-  const dataInicioEdicaoAlunoValida =
-    !dadosEdicaoAluno.dataInicioPlano ||
-    new Date(`${dadosEdicaoAluno.dataInicioPlano}T12:00:00`) >= new Date(`${dataMinimaAgendamento}T00:00:00`);
   const matriculasComContexto = matriculas.map((matricula) => {
     const solicitacaoRelacionada = obterSolicitacaoRelacionadaMatricula(matricula);
     const fluxoExperimental = matriculaEhFluxoExperimental(matricula, solicitacaoRelacionada);
@@ -1733,6 +1763,11 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
       const professorDaSolicitacao =
         solicitacao.professor_responsavel_id || solicitacao.professor_preferido_id || "sem_responsavel";
       if (professorDaSolicitacao !== filtroProfessorSolicitacoes) return false;
+    }
+
+    if (filtroTipoSolicitacao !== "todos") {
+      const tipoSolicitacao = solicitacao.tipo_solicitacao || "experimental";
+      if (tipoSolicitacao !== filtroTipoSolicitacao) return false;
     }
 
     if (tipoLogado === "admin" && filtroStatusSolicitacoesAdmin !== "todos") {
@@ -1963,9 +1998,9 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         Professor: {professorDaTurma}
                       </p>
                     )}
-                    {matricula.data_inicio && (
+                    {matricula.data_inicio && ["ativo", "experimental"].includes(matricula.status) && (
                       <p className="text-xs text-slate-500 mt-1">
-                        Início em {formatarDataCurta(matricula.data_inicio)}
+                        {matricula.status === "experimental" ? "Aula em" : "Início em"} {formatarDataCurta(matricula.data_inicio)}
                       </p>
                     )}
                     {matricula.status === "aguardando_aceite_professor" && professorIndicacao && (
@@ -2033,6 +2068,16 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     }
   }, [diaFiltroTurmas, diasComTurmaNoPainel]);
 
+  useEffect(() => {
+    if (!modalAberto) return;
+
+    const frame = requestAnimationFrame(() => {
+      conteudoModalPrincipalRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [modalAberto, tipoModal]);
+
   if (!acessoVerificado) {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-orange-500" /></div>;
   }
@@ -2087,17 +2132,19 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         ? "Novo Horário"
                         : tipoModal === "professor"
                           ? "Novo Professor"
-                          : tipoModal === "editar_professor"
+                        : tipoModal === "editar_professor"
                             ? "Editar Professor"
                         : tipoModal === "ver_solicitacao"
-                          ? "Aula Experimental"
+                          ? solicitacaoSelecionadaEhMatriculaDireta
+                            ? "Solicitação de Matrícula"
+                            : "Aula Experimental"
                           : dadosEfetivacao.solicitacaoId
-                            ? "Montar Treino"
+                            ? "Montar Plano"
                             : "Efetivar Aluno"}
                 </h2>
               </div>
 
-              <form onSubmit={salvarDados} className="flex-1 overflow-y-auto scrollbar-hide px-6 py-5 sm:px-8 sm:py-6 space-y-4">
+              <form ref={conteudoModalPrincipalRef} onSubmit={salvarDados} className="flex-1 overflow-y-auto scrollbar-hide px-6 py-5 sm:px-8 sm:py-6 space-y-4">
                 {erroModal && (
                   <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl flex items-start gap-3 text-sm font-medium mb-4">
                     <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -2451,13 +2498,13 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       </button>
                     )}
 
-                    {!solicitacaoAguardandoAceite && solicitacaoJaAssumida && (solicitacaoAguardandoResultado || solicitacaoProntaParaMatricula || solicitacaoFaltou) && (
+                    {!solicitacaoAguardandoAceite && !solicitacaoSelecionadaEhMatriculaDireta && solicitacaoJaAssumida && (solicitacaoAguardandoResultado || solicitacaoProntaParaMatricula || solicitacaoFaltou) && (
                       <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
                         <div>
                           <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Pos-experimental</p>
                           <p className="text-sm text-slate-500 mt-1">
                             {solicitacaoProntaParaMatricula
-                              ? "O aluno quer continuar. Agora defina as turmas reais e o início do plano."
+                        ? "O aluno quer continuar. Agora escolha as turmas reais do plano."
                               : solicitacaoFaltou
                                 ? "O aluno faltou. Agora voce decide se reagenda a aula teste ou se encerra esse fluxo."
                               : "Registre o resultado da aula experimental para decidir o proximo passo do aluno."}
@@ -2542,7 +2589,28 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       </div>
                     )}
 
-                    {!solicitacaoAguardandoAceite && solicitacaoJaAssumida && !solicitacaoProntaParaMatricula && !solicitacaoAguardandoResultado && !solicitacaoFaltou && (
+                    {!solicitacaoAguardandoAceite && solicitacaoSelecionadaEhMatriculaDireta && solicitacaoJaAssumida && (
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
+                        <div>
+                          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Matrícula</p>
+                          <p className="text-sm text-slate-500 mt-1">
+                            Esse aluno pediu matrícula ou retorno. Agora você pode montar o plano e selecionar as turmas.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => seguirParaMatricula(solicitacaoSelecionada)}
+                          disabled={carregando}
+                          className="w-full flex items-center justify-center gap-2 bg-white text-slate-950 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <CheckCircle2 className="w-5 h-5" />
+                          Montar Plano
+                        </button>
+                      </div>
+                    )}
+
+                    {!solicitacaoAguardandoAceite && !solicitacaoSelecionadaEhMatriculaDireta && solicitacaoJaAssumida && !solicitacaoProntaParaMatricula && !solicitacaoAguardandoResultado && !solicitacaoFaltou && (
                       <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3">
                         <div>
                           <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Agendamento</p>
@@ -2793,42 +2861,11 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
                     {turmasSelecionadasEfetivacao.length > 0 && (
                       <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
-                        <div>
-                          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Inicio do plano</p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            Escolha a data em que o plano do aluno começa. Essa mesma referência vale para as turmas selecionadas.
+                        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+                          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Início do plano</p>
+                          <p className="text-sm text-slate-300 mt-2">
+                            O início do plano será registrado automaticamente após o pagamento do aluno.
                           </p>
-                        </div>
-
-                        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 space-y-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-white">
-                                Data de início do plano
-                              </p>
-                              <p className="text-xs text-slate-400 mt-1">
-                                Defina a partir de quando a mensalidade e o plano começam a contar.
-                              </p>
-                            </div>
-                            <span className="text-[11px] px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-300 font-bold uppercase tracking-wider">
-                              Sugestão: {formatarDataCurta(dadosEfetivacao.dataInicioPlano || dataMinimaAgendamento)}
-                            </span>
-                          </div>
-
-                          <input
-                            type="date"
-                            min={dataMinimaAgendamento}
-                            value={dadosEfetivacao.dataInicioPlano}
-                            onChange={(e) => atualizarDataInicioEfetivacao(e.target.value)}
-                            style={{ colorScheme: "dark" }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm"
-                          />
-
-                          {dadosEfetivacao.dataInicioPlano && !dataInicioPlanoValida && (
-                            <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-                              Escolha uma data de início igual ou posterior a hoje.
-                            </div>
-                          )}
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -3041,43 +3078,17 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
                     {turmasSelecionadasEdicaoAluno.length > 0 ? (
                       <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-4">
-                        <div>
+                        <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
                           <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
                             Início do plano
                           </p>
-                          <p className="text-sm text-slate-500 mt-1">
-                            Essa data vale como referência do plano para todos os horários ativos do aluno.
+                          <p className="text-sm text-slate-300 mt-2">
+                            O início do plano continua automático e será registrado após o pagamento do aluno.
                           </p>
-                        </div>
-
-                        <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 space-y-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-bold text-white">
-                                Data de início do plano
-                              </p>
-                              <p className="text-xs text-slate-400 mt-1">
-                                Use a mesma referência para manter a cobrança e o histórico alinhados.
-                              </p>
-                            </div>
-                            <span className="text-[11px] px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-300 font-bold uppercase tracking-wider">
-                              Hoje: {formatarDataCurta(dataMinimaAgendamento)}
-                            </span>
-                          </div>
-
-                          <input
-                            type="date"
-                            min={dataMinimaAgendamento}
-                            value={dadosEdicaoAluno.dataInicioPlano}
-                            onChange={(e) => atualizarDataInicioEdicaoAluno(e.target.value)}
-                            style={{ colorScheme: "dark" }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-white outline-none focus:border-orange-500 text-sm"
-                          />
-
-                          {dadosEdicaoAluno.dataInicioPlano && !dataInicioEdicaoAlunoValida && (
-                            <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-                              Escolha uma data de início igual ou posterior a hoje.
-                            </div>
+                          {dadosEdicaoAluno.dataInicioPlano && (
+                            <p className="text-xs text-slate-500 mt-2">
+                              Referência atual: {formatarDataCurta(dadosEdicaoAluno.dataInicioPlano)}
+                            </p>
                           )}
                         </div>
                       </div>
@@ -3142,11 +3153,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                     type="submit"
                     disabled={
                       carregando ||
-                      (tipoModal === "editar_horarios_aluno" &&
-                        dadosEdicaoAluno.turmasIds.length > 0 &&
-                        !dataInicioEdicaoAlunoValida) ||
-                      (tipoModal === "efetivar_aluno" &&
-                        (dadosEfetivacao.turmasIds.length === 0 || !dataInicioPlanoValida))
+                      (tipoModal === "efetivar_aluno" && dadosEfetivacao.turmasIds.length === 0)
                     }
                     className="w-full mt-6 py-4 bg-orange-500 text-slate-950 font-bold text-sm rounded-xl hover:bg-orange-600 transition-colors shadow-lg disabled:opacity-50"
                   >
@@ -4222,7 +4229,13 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                     <p className="text-xs sm:text-sm text-slate-400">Novos alunos aguardando contato para agendar aula.</p>
                   </div>
 
-                  <div className={`grid grid-cols-1 gap-3 ${tipoLogado === "admin" ? "lg:grid-cols-[minmax(0,1fr)_220px_220px]" : ""}`}>
+                  <div
+                    className={`grid grid-cols-1 gap-3 ${
+                      tipoLogado === "admin"
+                        ? "xl:grid-cols-[minmax(0,1fr)_200px_220px_220px]"
+                        : "sm:grid-cols-[minmax(0,1fr)_200px]"
+                    }`}
+                  >
                     <input
                       type="text"
                       value={buscaSolicitacoes}
@@ -4230,6 +4243,16 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       placeholder="Buscar por nome, telefone ou responsável"
                       className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-orange-500"
                     />
+
+                    <select
+                      value={filtroTipoSolicitacao}
+                      onChange={(e) => setFiltroTipoSolicitacao(e.target.value as FiltroTipoSolicitacao)}
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition-colors focus:border-orange-500"
+                    >
+                      <option value="todos">Todos os tipos</option>
+                      <option value="experimental">Experimental</option>
+                      <option value="matricula">Matrícula</option>
+                    </select>
 
                     {tipoLogado === "admin" && (
                       <>
@@ -4322,6 +4345,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {solicitacoesFiltradas.map((solicitacao) => {
+                      const cardEhMatriculaDireta = solicitacaoEhMatriculaDireta(solicitacao);
                       const cardAguardandoMeuAceite =
                         solicitacao.status === "aguardando_aceite_professor" &&
                         solicitacao.professor_responsavel_id === usuarioLogadoId;
@@ -4334,19 +4358,23 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                         solicitacao.status === "agendado" && dataJaChegou(solicitacao.data_aula_experimental);
                       const cardProntoParaMatricula =
                         solicitacao.status === "aprovada_para_matricula";
-                      const labelBotaoVisualizar = cardAguardandoResultado
-                        ? "Registrar Resultado"
-                        : cardProntoParaMatricula
-                          ? "Montar Treino"
-                          : "Visualizar";
+                      const cardJaAssumido =
+                        !!solicitacao.professor_responsavel_id &&
+                        solicitacao.status !== "aguardando_aceite_professor";
+                      const exibirAtalhoMontarPlano = cardEhMatriculaDireta && cardJaAssumido;
+                      const labelBotaoVisualizar = !cardEhMatriculaDireta && cardAguardandoResultado
+                          ? "Registrar Resultado"
+                          : !cardEhMatriculaDireta && cardProntoParaMatricula
+                            ? "Montar Treino"
+                            : "Visualizar";
 
                       return (
                         <div key={solicitacao.id} className="bg-slate-900 border border-slate-700 p-4 sm:p-5 rounded-2xl flex flex-col justify-between">
                           <div>
-                            <div className="flex justify-between items-start mb-1 gap-3">
+                            <div className="mb-1 flex items-start justify-between gap-3">
                               <h3 className="font-bold text-base sm:text-lg text-white truncate pr-2">{solicitacao.nome_aluno}</h3>
-                              <span className="bg-orange-500/10 border border-orange-500/20 text-orange-400 text-[10px] uppercase font-bold px-2 py-1 rounded whitespace-nowrap flex-shrink-0">
-                                {solicitacao.nivel_experiencia || 'NÍVEL NÃO INFO.'}
+                              <span className="text-[10px] uppercase font-bold px-2 py-1 rounded border border-orange-500/20 bg-orange-500/10 text-orange-400 whitespace-nowrap flex-shrink-0">
+                                {cardEhMatriculaDireta ? "Matrícula" : "Experimental"}
                               </span>
                             </div>
                             <p className="text-sm text-slate-400 mb-3">{maskPhone(solicitacao.telefone_aluno)}</p>
@@ -4356,6 +4384,10 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                 {obterLabelStatusSolicitacao(solicitacao)}
                               </span>
                             </div>
+
+                            <p className="mb-3 text-xs text-slate-500">
+                              Nível: <span className="text-slate-300">{solicitacao.nivel_experiencia || "Não informado"}</span>
+                            </p>
                             
                             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 mb-3">
                               <p className="text-xs text-slate-500 mb-1 uppercase font-bold tracking-wider">Preferência de Horário</p>
@@ -4379,7 +4411,7 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                   </span>
                                 </p>
                               )}
-                              {solicitacao.data_aula_experimental && (
+                              {!cardEhMatriculaDireta && solicitacao.data_aula_experimental && (
                                 <p>
                                   Experimental:{" "}
                                   <span className="text-slate-300">
@@ -4438,11 +4470,25 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                 )}
                                 <button
                                   onClick={() => abrirModalSolicitacao(solicitacao)}
-                                  className={`w-full flex items-center justify-center gap-2 ${cardAbertaParaAssumir ? "bg-slate-800 text-white hover:bg-slate-700" : "bg-slate-800 text-white hover:bg-slate-700 sm:col-span-2"} font-bold py-3 rounded-xl transition-colors shadow-lg shadow-slate-900/20 border border-slate-700 hover:border-slate-600`}
+                                  className={`w-full flex items-center justify-center gap-2 ${
+                                    cardAbertaParaAssumir || exibirAtalhoMontarPlano
+                                      ? "bg-slate-800 text-white hover:bg-slate-700"
+                                      : "bg-slate-800 text-white hover:bg-slate-700 sm:col-span-2"
+                                  } font-bold py-3 rounded-xl transition-colors shadow-lg shadow-slate-900/20 border border-slate-700 hover:border-slate-600`}
                                 >
                                   <Eye className="w-5 h-5" />
                                   {labelBotaoVisualizar}
                                 </button>
+                                {exibirAtalhoMontarPlano && (
+                                  <button
+                                    type="button"
+                                    onClick={() => seguirParaMatricula(solicitacao)}
+                                    className="w-full flex items-center justify-center gap-2 bg-white text-slate-950 font-bold py-3 rounded-xl hover:bg-slate-200 transition-colors"
+                                  >
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    Montar Plano
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>

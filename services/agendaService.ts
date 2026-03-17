@@ -35,6 +35,8 @@ export async function buscarMinhaAgenda(): Promise<Matricula[]> {
           nome
         ),
         matriculas (
+          id,
+          status,
           perfis:perfis!matriculas_perfil_id_fkey (
             nome
           )

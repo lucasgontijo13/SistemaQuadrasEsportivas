@@ -110,6 +110,7 @@ export interface DadosNovoProfessor {
 export interface SolicitacaoAula {
   id: string;
   created_at: string;
+  tipo_solicitacao?: "experimental" | "matricula";
   nome_aluno: string;
   perfil_id?: string | null;
   telefone_aluno: string;

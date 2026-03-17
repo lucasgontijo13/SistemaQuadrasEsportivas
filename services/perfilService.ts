@@ -75,7 +75,7 @@ export async function atualizarPerfilUsuario(perfil: Perfil) {
   if (cadastroCompleto) {
     await supabase
       .from('matriculas')
-      .update({ status: 'aguardando_pagamento' })
+      .update({ status: 'aguardando_pagamento', data_inicio: null })
       .eq('perfil_id', perfil.id)
       .eq('status', 'aguardando_dados');
   }
@@ -137,7 +137,7 @@ export async function completarPerfilUsuario(dados: DadosCompletarPerfil) {
   if (cadastroCompleto) {
     const { error: matriculasError } = await supabase
       .from("matriculas")
-      .update({ status: "aguardando_pagamento" })
+      .update({ status: "aguardando_pagamento", data_inicio: null })
       .eq("perfil_id", session.user.id)
       .eq("status", "aguardando_dados");
 

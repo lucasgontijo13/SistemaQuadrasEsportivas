@@ -4,20 +4,41 @@ import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Calendar, Sun, Users, CalendarDays } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import {
+  buscarContextoSolicitacoesAluno,
+  ContextoSolicitacoesAluno,
+} from "@/services/solicitacaoAlunoService";
 
 export function Hero() {
-  const [logado, setLogado] = useState(false);
+  const [contextoAluno, setContextoAluno] = useState<ContextoSolicitacoesAluno | null>(null);
   const [carregando, setCarregando] = useState(true);
 
   useEffect(() => {
     async function verificar() {
-      const { data: { session } } = await supabase.auth.getSession();
-      setLogado(!!session);
-      setCarregando(false);
+      try {
+        const contexto = await buscarContextoSolicitacoesAluno();
+        setContextoAluno(contexto);
+      } finally {
+        setCarregando(false);
+      }
     }
     verificar();
   }, []);
+
+  const alunoLogado = !!contextoAluno?.logado && contextoAluno?.perfil?.tipo === "aluno";
+  const mostrarSolicitarMatricula = alunoLogado && contextoAluno?.podeSolicitarMatricula;
+  const mostrarSolicitarExperimental = alunoLogado && contextoAluno?.podeSolicitarExperimental;
+  const destinoBotaoPrincipal = !contextoAluno?.logado
+    ? "/aula-experimental"
+    : mostrarSolicitarMatricula
+      ? "/solicitar-matricula"
+      : "/agenda";
+  const textoBotaoPrincipal = !contextoAluno?.logado
+    ? "Agendar Aula Experimental"
+    : mostrarSolicitarMatricula
+      ? "Solicitar Matrícula"
+      : "Minha Agenda";
+  const iconeBotaoPrincipal = !contextoAluno?.logado || mostrarSolicitarMatricula ? Users : CalendarDays;
   
   return (
     <section className="pt-40 pb-20 px-6 max-w-6xl mx-auto grid lg:grid-cols-2 gap-16 items-center min-h-[90vh]">
@@ -51,26 +72,32 @@ export function Hero() {
         <div className="flex flex-col sm:flex-row gap-4 pt-4">
           {carregando ? (
             <div className="w-full sm:w-auto h-14 bg-slate-800 rounded-full animate-pulse"></div>
-          ) : logado ? (
-            <Link href="/agenda" className="w-full sm:w-auto">
+          ) : (
+            <Link href={destinoBotaoPrincipal} className="w-full sm:w-auto">
               <motion.button 
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 font-bold py-4 px-8 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-shadow hover:shadow-[0_0_40px_rgba(249,115,22,0.5)]"
               >
-                <CalendarDays className="w-5 h-5" />
-                Minha Agenda
+                {(() => {
+                  const IconePrincipal = iconeBotaoPrincipal;
+                  return <IconePrincipal className="w-5 h-5" />;
+                })()}
+                {textoBotaoPrincipal}
               </motion.button>
             </Link>
-          ) : (
+
+          )}
+
+          {mostrarSolicitarExperimental && (
             <Link href="/aula-experimental" className="w-full sm:w-auto">
               <motion.button 
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-500 to-amber-500 text-slate-950 font-bold py-4 px-8 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-shadow hover:shadow-[0_0_40px_rgba(249,115,22,0.5)]"
+                className="w-full flex items-center justify-center gap-2 bg-slate-900 border border-slate-700 text-white font-bold py-4 px-8 rounded-full transition-colors hover:bg-slate-800"
               >
-                <Users className="w-5 h-5" />
-                Agendar Aula Experimental
+                <Users className="w-5 h-5 text-orange-500" />
+                Solicitar Experimental
               </motion.button>
             </Link>
           )}
