@@ -4,6 +4,7 @@ import { Perfil } from "@/types";
 
 const normalizarTelefone = (valor?: string | null) => valor?.replace(/\D/g, "") || null;
 const normalizarDocumento = (valor?: string | null) => valor?.replace(/\D/g, "") || null;
+const obterTimestampAtual = () => new Date().toISOString();
 
 const perfilEstaCompleto = (perfil: Pick<Perfil, "cpf" | "data_nascimento" | "contato_emergencia" | "cep" | "rua" | "numero">) =>
   !!perfil.cpf &&
@@ -75,7 +76,7 @@ export async function atualizarPerfilUsuario(perfil: Perfil) {
   if (cadastroCompleto) {
     await supabase
       .from('matriculas')
-      .update({ status: 'aguardando_pagamento', data_inicio: null })
+      .update({ status: 'aguardando_pagamento', status_em: obterTimestampAtual(), data_inicio: null })
       .eq('perfil_id', perfil.id)
       .eq('status', 'aguardando_dados');
   }
@@ -137,7 +138,7 @@ export async function completarPerfilUsuario(dados: DadosCompletarPerfil) {
   if (cadastroCompleto) {
     const { error: matriculasError } = await supabase
       .from("matriculas")
-      .update({ status: "aguardando_pagamento", data_inicio: null })
+      .update({ status: "aguardando_pagamento", status_em: obterTimestampAtual(), data_inicio: null })
       .eq("perfil_id", session.user.id)
       .eq("status", "aguardando_dados");
 

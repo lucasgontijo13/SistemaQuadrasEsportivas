@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import {
+  AlertaPendenciaMatricula,
   DadosNovoProfessor,
   DadosTurma,
   HorarioQuadra,
@@ -9,6 +10,11 @@ import {
   SolicitacaoAula,
   Turma,
 } from "@/types";
+import {
+  matriculaTemPrazoExpiracao,
+  obterDataReferenciaStatusMatricula,
+  obterResumoPrazoMatricula,
+} from "@/utils/matriculaPendencia";
 
 const normalizarTelefone = (telefone: string) => telefone.replace(/\D/g, "");
 const gerarVariacoesTelefone = (telefone: string) => {
@@ -56,6 +62,10 @@ const colunaTipoSolicitacaoIndisponivel = (error: unknown) => {
   const message = mensagemErro(error).toLowerCase();
   return message.includes("tipo_solicitacao") && message.includes("solicitacoes_aula_experimental");
 };
+const colunaStatusEmMatriculaIndisponivel = (error: unknown) => {
+  const message = mensagemErro(error).toLowerCase();
+  return message.includes("status_em") && message.includes("matriculas");
+};
 const mapaDiaSemana: Record<string, number> = {
   Domingo: 0,
   Segunda: 1,
@@ -91,6 +101,66 @@ const obterDataAtualISO = () => {
   const dia = `${agora.getDate()}`.padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
 };
+
+const obterTimestampAtual = () => new Date().toISOString();
+
+const dadosAtualizacaoStatusMatricula = <T extends Record<string, unknown>>(
+  status: Matricula["status"],
+  extras: T
+) => ({
+  ...extras,
+  status,
+  status_em: obterTimestampAtual(),
+});
+
+const montarSelectTurmasPainel = (selectPerfilResumo: string, incluirStatusEm = true) => `
+      id,
+      dia_semana,
+      horario,
+      nivel,
+      professor_id,
+      vagas_totais,
+      ativa,
+      matriculas (
+        id,
+        created_at,
+        ${incluirStatusEm ? "status_em," : ""}
+        status,
+        data_inicio,
+        status_pos_aceite,
+        professor_indicacao_id,
+        ultima_recusa_professor_id,
+        ultima_recusa_observacao,
+        ultima_recusa_em,
+        perfil_id,
+        perfis:perfis!matriculas_perfil_id_fkey (
+          ${selectPerfilResumo}
+        )
+      )
+    `;
+
+const montarSelectMatriculasPainel = (
+  selectPerfil: string,
+  selectTurmasMatricula: string,
+  incluirStatusEm = true
+) => `
+      id,
+      created_at,
+      ${incluirStatusEm ? "status_em," : ""}
+      status,
+      data_inicio,
+      status_pos_aceite,
+      professor_indicacao_id,
+      ultima_recusa_professor_id,
+      ultima_recusa_observacao,
+      ultima_recusa_em,
+      perfil_id,
+      turma_id,
+      perfis:perfis!matriculas_perfil_id_fkey (${selectPerfil}),
+      turmas (
+        ${selectTurmasMatricula}
+      )
+    `;
 
 const resolverDataInicioPorStatus = (
   status: Matricula["status"],
@@ -416,50 +486,35 @@ export async function buscarDadosPainel(
     professores.map((professor) => [professor.id, { id: professor.id, nome: professor.nome }])
   );
 
-  const selectTurmasPainel = `
-      id,
-      dia_semana,
-      horario,
-      nivel,
-      professor_id,
-      vagas_totais,
-      ativa,
-      matriculas (
-        id,
-        status,
-        data_inicio,
-        status_pos_aceite,
-        professor_indicacao_id,
-        ultima_recusa_professor_id,
-        ultima_recusa_observacao,
-        ultima_recusa_em,
-        perfil_id,
-        perfis:perfis!matriculas_perfil_id_fkey (
-          ${selectPerfilResumo}
-        )
-      )
-    `;
+  let incluirStatusEm = true;
+  const montarConsultaTurmas = (comStatusEm: boolean, apenasDoProfessor: boolean) => {
+    let query = supabase
+      .from("turmas")
+      .select(montarSelectTurmasPainel(selectPerfilResumo, comStatusEm))
+      .order("id", { ascending: true });
 
-  let turmasQuery = supabase
-    .from("turmas")
-    .select(selectTurmasPainel)
-    .order("id", { ascending: true });
+    if (apenasDoProfessor && tipoPerfil === "professor" && perfilId) {
+      query = query.eq("professor_id", perfilId);
+    }
 
-  if (tipoPerfil === "professor" && perfilId) {
-    turmasQuery = turmasQuery.eq("professor_id", perfilId);
+    return query;
+  };
+
+  let { data: turmasData, error: turmasError } = await montarConsultaTurmas(true, true);
+
+  if (turmasError && colunaStatusEmMatriculaIndisponivel(turmasError)) {
+    incluirStatusEm = false;
+    const retry = await montarConsultaTurmas(false, true);
+    turmasData = retry.data;
+    turmasError = retry.error;
   }
-
-  const { data: turmasData, error: turmasError } = await turmasQuery;
 
   if (turmasError) throw new Error(turmasError.message);
 
   let turmasParaFluxosData = turmasData;
 
   if (tipoPerfil === "professor") {
-    const { data, error } = await supabase
-      .from("turmas")
-      .select(selectTurmasPainel)
-      .order("id", { ascending: true });
+    const { data, error } = await montarConsultaTurmas(incluirStatusEm, false);
 
     if (error) throw new Error(error.message);
     turmasParaFluxosData = data;
@@ -485,23 +540,11 @@ export async function buscarDadosPainel(
     vagas_totais,
     ativa
   `;
-  const selectMatriculas =
-    `
-      id,
-      status,
-      data_inicio,
-      status_pos_aceite,
-      professor_indicacao_id,
-      ultima_recusa_professor_id,
-      ultima_recusa_observacao,
-      ultima_recusa_em,
-      perfil_id,
-      turma_id,
-      perfis:perfis!matriculas_perfil_id_fkey (${selectPerfil}),
-      turmas (
-        ${selectTurmasMatricula}
-      )
-    `;
+  const selectMatriculas = montarSelectMatriculasPainel(
+    selectPerfil,
+    selectTurmasMatricula,
+    incluirStatusEm
+  );
 
   let matriculasQuery = supabase
     .from("matriculas")
@@ -595,6 +638,320 @@ export async function buscarDadosPainel(
       })) || []),
     alunos,
     professores,
+  };
+}
+
+export async function buscarAlertasPendenciasEquipe(
+  perfilId: string,
+  tipoPerfil: string
+): Promise<AlertaPendenciaMatricula[]> {
+  if (!perfilId || !["admin", "professor"].includes(tipoPerfil)) {
+    return [];
+  }
+
+  let turmasVisiveisIds: number[] = [];
+
+  if (tipoPerfil === "professor") {
+    const { data: turmasProfessor, error: turmasProfessorError } = await supabase
+      .from("turmas")
+      .select("id")
+      .eq("professor_id", perfilId);
+
+    if (turmasProfessorError) throw new Error(turmasProfessorError.message);
+    turmasVisiveisIds = ((turmasProfessor as Array<{ id: number }> | null) || []).map((turma) => turma.id);
+  }
+
+  const montarSelectAlertas = (incluirStatusEm: boolean) => `
+    id,
+    perfil_id,
+    turma_id,
+    created_at,
+    ${incluirStatusEm ? "status_em," : ""}
+    status,
+    professor_indicacao_id,
+    perfis:perfis!matriculas_perfil_id_fkey (
+      id,
+      nome,
+      whatsapp
+    ),
+    turmas (
+      id,
+      dia_semana,
+      horario,
+      professor_id
+    )
+  `;
+
+  const montarConsultaAlertas = (incluirStatusEm: boolean) => {
+    let query = supabase
+      .from("matriculas")
+      .select(montarSelectAlertas(incluirStatusEm))
+      .in("status", ["aguardando_aceite_professor", "aguardando_dados", "aguardando_pagamento"]);
+
+    if (tipoPerfil === "professor") {
+      if (turmasVisiveisIds.length === 0) {
+        query = query.eq("professor_indicacao_id", perfilId);
+      } else {
+        query = query.or(`turma_id.in.(${turmasVisiveisIds.join(",")}),professor_indicacao_id.eq.${perfilId}`);
+      }
+    }
+
+    return query.order("id", { ascending: false });
+  };
+
+  let { data: matriculasData, error: matriculasError } = await montarConsultaAlertas(true);
+
+  if (matriculasError && colunaStatusEmMatriculaIndisponivel(matriculasError)) {
+    const retry = await montarConsultaAlertas(false);
+    matriculasData = retry.data;
+    matriculasError = retry.error;
+  }
+
+  if (matriculasError) throw new Error(matriculasError.message);
+
+  const alertasPorChave = new Map<string, AlertaPendenciaMatricula>();
+
+  (((matriculasData as Array<{
+    id: number;
+    perfil_id: string;
+    turma_id: number;
+    created_at?: string | null;
+    status_em?: string | null;
+    status: Matricula["status"];
+    professor_indicacao_id?: string | null;
+    perfis?: { id: string; nome: string; whatsapp: string } | null;
+    turmas?:
+      | { id: number; dia_semana: string; horario: string; professor_id: string | null }
+      | Array<{ id: number; dia_semana: string; horario: string; professor_id: string | null }>
+      | null;
+  }> | null) || [])).forEach((matricula) => {
+    if (!matriculaTemPrazoExpiracao(matricula.status)) return;
+
+    const dataReferencia = obterDataReferenciaStatusMatricula(matricula);
+    const resumoPrazo = obterResumoPrazoMatricula(matricula.status, dataReferencia);
+    if (!dataReferencia || !resumoPrazo?.vencida) return;
+    const turma = Array.isArray(matricula.turmas) ? matricula.turmas[0] : matricula.turmas;
+
+    const chave =
+      matricula.status === "aguardando_aceite_professor"
+        ? `matricula:${matricula.id}`
+        : `plano:${matricula.perfil_id}:${matricula.status}`;
+    const existente = alertasPorChave.get(chave);
+
+    if (existente) {
+      existente.total_turmas_relacionadas += 1;
+      if (resumoPrazo.horasEmAberto > existente.horas_em_aberto) {
+        existente.horas_em_aberto = resumoPrazo.horasEmAberto;
+        existente.data_referencia = dataReferencia;
+      }
+      return;
+    }
+
+    alertasPorChave.set(chave, {
+      chave,
+      matricula_id: matricula.id,
+      perfil_id: matricula.perfil_id,
+      nome_aluno: matricula.perfis?.nome || "Aluno",
+      whatsapp_aluno: matricula.perfis?.whatsapp || "",
+      status: matricula.status,
+      data_referencia: dataReferencia,
+      horas_em_aberto: resumoPrazo.horasEmAberto,
+      prazo_horas: resumoPrazo.prazoHoras,
+      total_turmas_relacionadas: 1,
+      dia_semana: turma?.dia_semana || null,
+      horario: turma?.horario || null,
+    });
+  });
+
+  return Array.from(alertasPorChave.values()).sort((a, b) => {
+    if (b.horas_em_aberto !== a.horas_em_aberto) {
+      return b.horas_em_aberto - a.horas_em_aberto;
+    }
+
+    return a.nome_aluno.localeCompare(b.nome_aluno);
+  });
+}
+
+export async function encerrarPendenciaMatricula(
+  matriculaId: number,
+  operadorId: string,
+  tipoPerfil: string
+) {
+  const { data: matricula, error } = await supabase
+    .from("matriculas")
+    .select(`
+      id,
+      perfil_id,
+      status,
+      professor_indicacao_id,
+      turma_id,
+      turmas:turmas!inner (
+        id,
+        professor_id,
+        dia_semana,
+        horario
+      )
+    `)
+    .eq("id", matriculaId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!matricula) throw new Error("Pendência não encontrada.");
+  if (!matriculaTemPrazoExpiracao(matricula.status)) {
+    throw new Error("Essa matrícula não está em uma etapa com encerramento manual.");
+  }
+
+  const turmaBase = Array.isArray(matricula.turmas) ? matricula.turmas[0] : matricula.turmas;
+  const podeGerenciarMatricula =
+    tipoPerfil === "admin" ||
+    (tipoPerfil === "professor" &&
+      (!!turmaBase && turmaBase.professor_id === operadorId || matricula.professor_indicacao_id === operadorId));
+
+  if (!podeGerenciarMatricula) {
+    throw new Error("Você não pode encerrar essa pendência.");
+  }
+
+  let idsParaEncerrar = [matriculaId];
+
+  if (matricula.status === "aguardando_dados" || matricula.status === "aguardando_pagamento") {
+    const { data: matriculasPendentesMesmoPlano, error: buscarPendentesError } = await supabase
+      .from("matriculas")
+      .select(`
+        id,
+        professor_indicacao_id,
+        turmas:turmas!inner (
+          professor_id
+        )
+      `)
+      .eq("perfil_id", matricula.perfil_id)
+      .in("status", ["aguardando_dados", "aguardando_pagamento"]);
+
+    if (buscarPendentesError) throw new Error(buscarPendentesError.message);
+
+    const matriculasVisiveis =
+      tipoPerfil === "admin"
+        ? (matriculasPendentesMesmoPlano as Array<{ id: number }> | null) || []
+        : (((matriculasPendentesMesmoPlano as Array<{
+            id: number;
+            professor_indicacao_id?: string | null;
+            turmas?: { professor_id: string | null } | { professor_id: string | null }[] | null;
+          }> | null) || []).filter((item) => {
+            const turma = Array.isArray(item.turmas) ? item.turmas[0] : item.turmas;
+            return turma?.professor_id === operadorId || item.professor_indicacao_id === operadorId;
+          }));
+
+    idsParaEncerrar = matriculasVisiveis.map((item) => item.id);
+
+    if (idsParaEncerrar.length === 0) {
+      throw new Error("Você não pode encerrar essa pendência.");
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from("matriculas")
+    .update(
+      dadosAtualizacaoStatusMatricula("inativo", {
+        data_inicio: null,
+        status_pos_aceite: null,
+        professor_indicacao_id: null,
+      })
+    )
+    .in("id", idsParaEncerrar);
+
+  if (updateError) throw new Error(updateError.message);
+
+  return {
+    totalEncerradas: idsParaEncerrar.length,
+    statusEncerrado: matricula.status,
+    diaSemana: turmaBase?.dia_semana || null,
+    horario: turmaBase?.horario || null,
+  };
+}
+
+export async function encerrarMatriculaAluno(
+  perfilId: string,
+  operadorId: string,
+  tipoPerfil: string
+) {
+  if (!perfilId) throw new Error("Aluno não identificado para encerramento.");
+
+  const { data: matriculasAtuais, error: matriculasError } = await supabase
+    .from("matriculas")
+    .select(`
+      id,
+      status,
+      professor_indicacao_id,
+      turmas:turmas!inner (
+        id,
+        professor_id,
+        dia_semana,
+        horario
+      )
+    `)
+    .eq("perfil_id", perfilId)
+    .in("status", statusMatriculasRegularesEmAndamento);
+
+  if (matriculasError) throw new Error(matriculasError.message);
+
+  const matriculasRegularesAtuais =
+    ((matriculasAtuais as Array<{
+      id: number;
+      status: Matricula["status"];
+      professor_indicacao_id?: string | null;
+      turmas?: { id: number; professor_id: string | null; dia_semana: string; horario: string }[] | {
+        id: number;
+        professor_id: string | null;
+        dia_semana: string;
+        horario: string;
+      } | null;
+    }> | null) || []);
+
+  if (matriculasRegularesAtuais.length === 0) {
+    throw new Error("Esse aluno não tem matrículas em andamento para encerrar.");
+  }
+
+  if (tipoPerfil === "professor") {
+    const existeTurmaDeOutroProfessor = matriculasRegularesAtuais.some((matricula) => {
+      const turma = Array.isArray(matricula.turmas) ? matricula.turmas[0] : matricula.turmas;
+      return turma?.professor_id !== operadorId && matricula.professor_indicacao_id !== operadorId;
+    });
+
+    if (existeTurmaDeOutroProfessor) {
+      throw new Error("Esse aluno tem horários com outros professores. Para encerrar a matrícula geral, peça para um admin.");
+    }
+  }
+
+  const idsParaEncerrar = matriculasRegularesAtuais.map((matricula) => matricula.id);
+
+  const { error: updateMatriculasError } = await supabase
+    .from("matriculas")
+    .update(
+      dadosAtualizacaoStatusMatricula("inativo", {
+        data_inicio: null,
+        status_pos_aceite: null,
+        professor_indicacao_id: null,
+      })
+    )
+    .in("id", idsParaEncerrar);
+
+  if (updateMatriculasError) throw new Error(updateMatriculasError.message);
+
+  const { error: updateSolicitacoesError } = await supabase
+    .from("solicitacoes_aula_experimental")
+    .update({
+      status: "cancelado",
+      resultado_experimental_em: obterTimestampAtual(),
+    })
+    .eq("perfil_id", perfilId)
+    .eq("tipo_solicitacao", "matricula")
+    .in("status", ["pendente", "aguardando_aceite_professor", "aprovada_para_matricula", "matricula_em_andamento"]);
+
+  if (updateSolicitacoesError && !colunaTipoSolicitacaoIndisponivel(updateSolicitacoesError)) {
+    throw new Error(updateSolicitacoesError.message);
+  }
+
+  return {
+    totalEncerradas: idsParaEncerrar.length,
   };
 }
 
@@ -712,15 +1069,14 @@ export async function atualizarTurmasAluno({
     if (matriculaPreferencial) {
       const { error } = await supabase
         .from("matriculas")
-        .update({
-          status: statusBase,
+        .update(dadosAtualizacaoStatusMatricula(statusBase, {
           data_inicio: dataInicioAplicada,
           status_pos_aceite: null,
           professor_indicacao_id: null,
           ultima_recusa_professor_id: null,
           ultima_recusa_observacao: null,
           ultima_recusa_em: null,
-        })
+        }))
         .eq("id", matriculaPreferencial.id);
 
       if (error) throw new Error(error.message);
@@ -732,6 +1088,7 @@ export async function atualizarTurmasAluno({
       .insert([{
         perfil_id: perfilId,
         turma_id: turmaId,
+        status_em: obterTimestampAtual(),
         status: statusBase,
         data_inicio: dataInicioAplicada,
       }]);
@@ -746,7 +1103,7 @@ export async function atualizarTurmasAluno({
   for (const matricula of matriculasParaInativar) {
     const { error } = await supabase
       .from("matriculas")
-      .update({ status: "inativo" })
+      .update(dadosAtualizacaoStatusMatricula("inativo", {}))
       .eq("id", matricula.id);
 
     if (error) throw new Error(error.message);
@@ -930,24 +1287,22 @@ export async function efetivarMatricula({
     );
 
     const dadosAtualizacao = precisaAceiteOutroProfessor
-      ? {
-          status: "aguardando_aceite_professor" as Matricula["status"],
+      ? dadosAtualizacaoStatusMatricula("aguardando_aceite_professor", {
           data_inicio: null,
           status_pos_aceite: statusDestino,
           professor_indicacao_id: professorSolicitanteId,
           ultima_recusa_professor_id: null,
           ultima_recusa_observacao: null,
           ultima_recusa_em: null,
-        }
-      : {
-          status: statusDestino,
+        })
+      : dadosAtualizacaoStatusMatricula(statusDestino, {
           data_inicio: dataInicioDireta,
           status_pos_aceite: null,
           professor_indicacao_id: null,
           ultima_recusa_professor_id: null,
           ultima_recusa_observacao: null,
           ultima_recusa_em: null,
-        };
+        });
 
     if (matriculaDaTurma) {
       const { error } = await supabase
@@ -974,7 +1329,13 @@ export async function efetivarMatricula({
   if (origem && !turmasUnicas.includes(origem.turma_id)) {
     const { error } = await supabase
       .from("matriculas")
-      .update({ status: "inativo", status_pos_aceite: null, professor_indicacao_id: null })
+      .update(
+        dadosAtualizacaoStatusMatricula("inativo", {
+          status_pos_aceite: null,
+          professor_indicacao_id: null,
+          data_inicio: null,
+        })
+      )
       .eq("id", origem.id);
 
     if (error) throw new Error(error.message);
@@ -1045,15 +1406,14 @@ export async function aceitarMatriculaPendenteProfessor(matriculaId: number, pro
   const statusFinal = (matricula.status_pos_aceite as Matricula["status"] | null) || "aguardando_pagamento";
   const { error: updateError } = await supabase
     .from("matriculas")
-    .update({
-      status: statusFinal,
+    .update(dadosAtualizacaoStatusMatricula(statusFinal, {
       data_inicio: resolverDataInicioPorStatus(statusFinal, matricula.data_inicio, true),
       status_pos_aceite: null,
       professor_indicacao_id: null,
       ultima_recusa_professor_id: null,
       ultima_recusa_observacao: null,
       ultima_recusa_em: null,
-    })
+    }))
     .eq("id", matriculaId);
 
   if (updateError) throw new Error(updateError.message);
@@ -1097,13 +1457,13 @@ export async function recusarMatriculaPendenteProfessor(
 
   const { error: updateError } = await supabase
     .from("matriculas")
-    .update({
-      status: "inativo",
+    .update(dadosAtualizacaoStatusMatricula("inativo", {
       status_pos_aceite: null,
       ultima_recusa_professor_id: professorId,
       ultima_recusa_observacao: observacaoNormalizada,
       ultima_recusa_em: new Date().toISOString(),
-    })
+      data_inicio: null,
+    }))
     .eq("id", matriculaId);
 
   if (updateError) throw new Error(updateError.message);
@@ -1623,7 +1983,7 @@ export async function registrarResultadoAulaExperimental({
   if (resultado === "faltou") {
     const { error: matriculasError } = await supabase
       .from("matriculas")
-      .update({ status: "pendente" })
+      .update(dadosAtualizacaoStatusMatricula("pendente", {}))
       .eq("perfil_id", perfil.id)
       .eq("status", "experimental");
 
@@ -1633,11 +1993,11 @@ export async function registrarResultadoAulaExperimental({
   if (resultado === "cancelado") {
     const { error: matriculasError } = await supabase
       .from("matriculas")
-      .update({
-        status: "inativo",
+      .update(dadosAtualizacaoStatusMatricula("inativo", {
         status_pos_aceite: null,
         professor_indicacao_id: null,
-      })
+        data_inicio: null,
+      }))
       .eq("perfil_id", perfil.id)
       .in("status", ["experimental", "pendente"]);
 
@@ -1647,7 +2007,7 @@ export async function registrarResultadoAulaExperimental({
   if (resultado === "nao_vai_continuar") {
     const { error: matriculasError } = await supabase
       .from("matriculas")
-      .update({ status: "inativo" })
+      .update(dadosAtualizacaoStatusMatricula("inativo", { data_inicio: null }))
       .eq("perfil_id", perfil.id)
       .in("status", ["experimental", "pendente"]);
 
@@ -1769,14 +2129,25 @@ export async function agendarAulaExperimental({
   if (matriculaExperimental) {
     const { error: atualizacaoError } = await supabase
       .from("matriculas")
-      .update({ turma_id: turmaId, data_inicio: dataInicioNormalizada, status: "experimental" })
+      .update(
+        dadosAtualizacaoStatusMatricula("experimental", {
+          turma_id: turmaId,
+          data_inicio: dataInicioNormalizada,
+        })
+      )
       .eq("id", matriculaExperimental.id);
 
     if (atualizacaoError) throw new Error(atualizacaoError.message);
   } else {
     const { error: insertError } = await supabase
       .from("matriculas")
-      .insert([{ perfil_id: perfil.id, turma_id: turmaId, status: "experimental", data_inicio: dataInicioNormalizada }]);
+      .insert([{
+        perfil_id: perfil.id,
+        turma_id: turmaId,
+        status: "experimental",
+        status_em: obterTimestampAtual(),
+        data_inicio: dataInicioNormalizada,
+      }]);
 
     if (insertError) throw new Error(insertError.message);
   }

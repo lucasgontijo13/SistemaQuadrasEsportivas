@@ -18,9 +18,18 @@ import {
   atualizarResponsavelSolicitacao, aceitarRepasseSolicitacao,
   recusarRepasseSolicitacao, repassarSolicitacaoParaProfessor,
   registrarTentativaContatoSolicitacao, agendarAulaExperimental,
-  registrarResultadoAulaExperimental, aceitarMatriculaPendenteProfessor, recusarMatriculaPendenteProfessor
+  registrarResultadoAulaExperimental, aceitarMatriculaPendenteProfessor, recusarMatriculaPendenteProfessor,
+  encerrarPendenciaMatricula, encerrarMatriculaAluno
 } from "@/services/adminService";
 import { supabase } from "@/lib/supabase";
+import {
+  formatarTempoAbertoPendencia,
+  matriculaTemPrazoExpiracao,
+  obterDataReferenciaStatusMatricula,
+  obterLabelStatusPendencia,
+  obterPrazoLabelMatricula,
+  obterResumoPrazoMatricula,
+} from "@/utils/matriculaPendencia";
 
 
 const maskPhone = (value: string) => {
@@ -587,6 +596,10 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
 
   const recarregarPainel = async (perfilId = usuarioLogadoId, tipoPerfil = tipoLogado) => {
     await Promise.all([buscarDados(tipoPerfil, perfilId), carregarSolicitacoes(perfilId, tipoPerfil)]);
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("painelAtualizado"));
+    }
   };
 
   const abrirModalEdicaoProfessor = (prof: Perfil) => {
@@ -1231,6 +1244,77 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
     } finally {
       setCarregando(false);
     }
+  };
+
+  const confirmarEncerramentoPendenciaMatricula = (matricula: Matricula) => {
+    const turma = matricula.turmas || turmas.find((item) => item.id === matricula.turma_id);
+    const ehPlanoPendente =
+      matricula.status === "aguardando_dados" || matricula.status === "aguardando_pagamento";
+    const descricaoTurma = turma ? `${turma.dia_semana} às ${turma.horario.substring(0, 5)}` : "essa turma";
+
+    setModalConfirmacao({
+      aberto: true,
+      titulo: "Encerrar Pendência",
+      mensagem: ehPlanoPendente
+        ? `Isso vai encerrar as pendências visíveis deste plano e liberar as vagas reservadas para ${alunoSelecionado?.perfis?.nome || "o aluno"}.`
+        : `Isso vai encerrar a pendência de ${descricaoTurma} e retirar essa turma da fila de aceite.`,
+      acao: async () => {
+        setModalConfirmacao((prev) => ({ ...prev, aberto: false }));
+        setCarregando(true);
+        setErroModal("");
+
+        try {
+          const resultado = await encerrarPendenciaMatricula(matricula.id, usuarioLogadoId, tipoLogado);
+          await recarregarPainel();
+          setModalSucesso({
+            aberto: true,
+            titulo: "Pendência Encerrada",
+            mensagem:
+              resultado.totalEncerradas > 1
+                ? `${resultado.totalEncerradas} turmas pendentes foram encerradas e as vagas voltaram a ficar disponíveis.`
+                : "A pendência foi encerrada e a vaga foi liberada.",
+          });
+        } catch (error) {
+          setErroModal(error instanceof Error ? error.message : "Não foi possível encerrar essa pendência.");
+        } finally {
+          setCarregando(false);
+        }
+      },
+    });
+  };
+
+  const confirmarEncerramentoMatriculaAluno = (matricula: Matricula) => {
+    const nomeAluno = matricula.perfis?.nome || alunoSelecionado?.perfis?.nome || "o aluno";
+
+    setModalConfirmacao({
+      aberto: true,
+      titulo: "Encerrar Matrícula",
+      mensagem:
+        `Isso vai encerrar a matrícula atual de ${nomeAluno} e retirar o aluno de todos os horários ativos deste plano. Deseja continuar?`,
+      acao: async () => {
+        setModalConfirmacao((prev) => ({ ...prev, aberto: false }));
+        setCarregando(true);
+        setErroModal("");
+
+        try {
+          const resultado = await encerrarMatriculaAluno(matricula.perfil_id, usuarioLogadoId, tipoLogado);
+          await recarregarPainel();
+          fecharModalPrincipal();
+          setModalSucesso({
+            aberto: true,
+            titulo: "Matrícula Encerrada",
+            mensagem:
+              resultado.totalEncerradas > 1
+                ? `${resultado.totalEncerradas} horários foram encerrados para este aluno.`
+                : "A matrícula foi encerrada com sucesso.",
+          });
+        } catch (error) {
+          setErroModal(error instanceof Error ? error.message : "Não foi possível encerrar a matrícula.");
+        } finally {
+          setCarregando(false);
+        }
+      },
+    });
   };
 
   const transferirSolicitacao = async (solicitacao: SolicitacaoAula, professorDestinoId: string) => {
@@ -1982,6 +2066,23 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
               turma?.professor_id === usuarioLogadoId;
             const professorDaTurma = turma ? obterNomeProfessorTurma(turma) : "";
             const professorIndicacao = buscarNomeProfessorPorId(matricula.professor_indicacao_id);
+            const resumoPrazoPendencia = matriculaTemPrazoExpiracao(matricula.status)
+              ? obterResumoPrazoMatricula(
+                  matricula.status,
+                  obterDataReferenciaStatusMatricula(matricula)
+                )
+              : null;
+            const pendenciaVencida = !!resumoPrazoPendencia?.vencida;
+            const textoPendenciaVencida =
+              pendenciaVencida && matriculaTemPrazoExpiracao(matricula.status)
+                ? `${obterLabelStatusPendencia(matricula.status)} vencida há ${formatarTempoAbertoPendencia(
+                    Math.max(1, resumoPrazoPendencia!.horasEmAberto - resumoPrazoPendencia!.prazoHoras)
+                  )}.`
+                : null;
+            const textoPrazoPendencia =
+              matriculaTemPrazoExpiracao(matricula.status)
+                ? `Prazo base: ${obterPrazoLabelMatricula(matricula.status)}`
+                : null;
 
             return (
               <div
@@ -2029,22 +2130,49 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                   </span>
                 </div>
 
-                {podeResponderMatriculaPendente && (
+                {textoPendenciaVencida && (
+                  <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-300" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-amber-300">{textoPendenciaVencida}</p>
+                        {textoPrazoPendencia && (
+                          <p className="mt-1 text-[11px] text-slate-300">{textoPrazoPendencia}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {(podeResponderMatriculaPendente || pendenciaVencida) && (
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={() => aceitarMatriculaPendente(matricula)}
-                      className="flex-1 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-600"
-                    >
-                      Aceitar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => abrirModalRecusaMatricula(matricula)}
-                      className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:border-red-500/40 hover:text-red-300"
-                    >
-                      Recusar
-                    </button>
+                    {podeResponderMatriculaPendente && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => aceitarMatriculaPendente(matricula)}
+                          className="flex-1 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-bold text-slate-950 transition-colors hover:bg-emerald-600"
+                        >
+                          Aceitar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => abrirModalRecusaMatricula(matricula)}
+                          className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:border-red-500/40 hover:text-red-300"
+                        >
+                          Recusar
+                        </button>
+                      </>
+                    )}
+                    {pendenciaVencida && (
+                      <button
+                        type="button"
+                        onClick={() => confirmarEncerramentoPendenciaMatricula(matricula)}
+                        className="flex-1 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm font-bold text-red-200 transition-colors hover:bg-red-500/20"
+                      >
+                        Encerrar pendência
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -2177,16 +2305,29 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    {alunoSelecionado.perfil_id && secaoAtiva === "matriculas" && alunoSelecionadoTemTurmaRegularConfirmada && (
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => abrirEdicaoHorariosAluno(alunoSelecionado)}
-                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-700"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                          Editar horários
-                        </button>
+                    {alunoSelecionado.perfil_id && secaoAtiva === "matriculas" && (
+                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                        {alunoSelecionadoTemTurmaRegularConfirmada && (
+                          <button
+                            type="button"
+                            onClick={() => abrirEdicaoHorariosAluno(alunoSelecionado)}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-700"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                            Editar horários
+                          </button>
+                        )}
+
+                        {alunoSelecionadoTemMatriculaRegularAtual && (
+                          <button
+                            type="button"
+                            onClick={() => confirmarEncerramentoMatriculaAluno(alunoSelecionado)}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-200 transition-colors hover:bg-red-500/20"
+                          >
+                            <X className="h-4 w-4" />
+                            Encerrar matrícula
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -2729,35 +2870,39 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       <p className="text-xs text-slate-500 mb-3">
                         Voce pode selecionar mais de uma turma no mesmo dia, se fizer sentido para a rotina do aluno.
                       </p>
-                      
-                        <div className="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-hide -mx-2 px-2 sm:mx-0 sm:px-0">
-                        {diasDisponiveisEfetivacao.map(dia => {
-                          const temTurmaNesteDia = turmasDisponiveisEfetivacao.some(
-                            (turma) => turma.dia_semana === dia && dadosEfetivacao.turmasIds.includes(turma.id)
-                          );
-                          return (
-                            <button
-                              key={dia}
-                              type="button"
-                              onClick={() => setDiaFiltroModal(dia)}
-                              className={`flex-shrink-0 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 ${
-                                diaFiltroModal === dia ? "bg-slate-700 text-white" : "bg-slate-950 text-slate-500 border border-slate-800 hover:border-slate-700"
-                              }`}
-                            >
-                              {dia.substring(0,3)}
-                              {temTurmaNesteDia && <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>}
-                            </button>
-                          );
-                        })}
-                      </div>
 
-                      <div className="flex flex-col gap-3 mt-4">
-                        {turmasFiltradasNoModal.length === 0 ? (
-                          <p className="text-xs text-slate-500 py-6 text-center bg-slate-950 rounded-xl border border-slate-800">
-                            Nenhuma turma disponível neste dia.
-                          </p>
-                        ) : (
-                          turmasFiltradasNoModal.map(t => {
+                      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                        <div className="border-b border-slate-800 bg-slate-900 px-3 py-3 sm:px-4">
+                          <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                            {diasDisponiveisEfetivacao.map(dia => {
+                              const temTurmaNesteDia = turmasDisponiveisEfetivacao.some(
+                                (turma) => turma.dia_semana === dia && dadosEfetivacao.turmasIds.includes(turma.id)
+                              );
+                              return (
+                                <button
+                                  key={dia}
+                                  type="button"
+                                  onClick={() => setDiaFiltroModal(dia)}
+                                  className={`flex-shrink-0 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 ${
+                                    diaFiltroModal === dia ? "bg-slate-700 text-white" : "bg-slate-950 text-slate-500 border border-slate-800 hover:border-slate-700"
+                                  }`}
+                                >
+                                  {dia.substring(0,3)}
+                                  {temTurmaNesteDia && <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="max-h-[24rem] overflow-y-auto scrollbar-hide p-3 sm:max-h-[28rem] sm:p-4">
+                          <div className="flex flex-col gap-3">
+                            {turmasFiltradasNoModal.length === 0 ? (
+                              <p className="text-xs text-slate-500 py-6 text-center bg-slate-950 rounded-xl border border-slate-800">
+                                Nenhuma turma disponível neste dia.
+                              </p>
+                            ) : (
+                              turmasFiltradasNoModal.map(t => {
                             const selecionado = dadosEfetivacao.turmasIds.includes(t.id);
                             const lotacao = contarOcupacaoTurma(t);
                             const estaCheia = lotacao >= t.vagas_totais;
@@ -2854,8 +2999,10 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                                 </div>
                               </div>
                             )
-                          })
-                        )}
+                              })
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -2965,115 +3112,119 @@ export default function AdminDashboard({ secaoAtiva }: AdminDashboardProps) {
                       </select>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">
-                          Horários do Aluno
-                        </label>
-                        <span className="text-xs font-bold bg-slate-800 text-orange-500 px-2 py-0.5 rounded-md">
-                          {dadosEdicaoAluno.turmasIds.length} selec.
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500 mb-3">
-                        Toque para adicionar ou remover horários. Você pode ajustar mais de uma turma do mesmo aluno.
-                      </p>
-
-                      <div className="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-hide -mx-2 px-2 sm:mx-0 sm:px-0">
-                        {diasComTurmaEditavel.map((dia) => {
-                          const temSelecionadaNoDia = turmasEditaveisAluno.some(
-                            (turma) => turma.dia_semana === dia && dadosEdicaoAluno.turmasIds.includes(turma.id)
-                          );
-
-                          return (
-                            <button
-                              key={`edicao-dia-${dia}`}
-                              type="button"
-                              onClick={() => setDiaFiltroModal(dia)}
-                              className={`flex-shrink-0 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 ${
-                                diaFiltroModal === dia
-                                  ? "bg-slate-700 text-white"
-                                  : "bg-slate-950 text-slate-500 border border-slate-800 hover:border-slate-700"
-                              }`}
-                            >
-                              {dia.substring(0, 3)}
-                              {temSelecionadaNoDia && <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                      {turmasEditaveisFiltradasNoModal.length === 0 ? (
-                        <p className="text-xs text-slate-500 py-6 text-center bg-slate-950 rounded-xl border border-slate-800">
-                          Nenhuma turma disponível neste dia.
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden">
+                      <div className="border-b border-slate-800 bg-slate-950/95 backdrop-blur px-4 py-4 sm:px-5 sticky top-0 z-10">
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs text-slate-400 font-bold uppercase tracking-wider block">
+                            Horários do Aluno
+                          </label>
+                          <span className="text-xs font-bold bg-slate-800 text-orange-500 px-2 py-0.5 rounded-md">
+                            {dadosEdicaoAluno.turmasIds.length} selec.
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-3">
+                          Toque para adicionar ou remover horários. Você pode ajustar mais de uma turma do mesmo aluno.
                         </p>
-                      ) : (
-                        turmasEditaveisFiltradasNoModal.map((turma) => {
-                          const selecionado = dadosEdicaoAluno.turmasIds.includes(turma.id);
-                          const lotacao = contarOcupacaoTurma(turma);
-                          const matriculasVisiveisDaTurma = obterMatriculasVisiveisTurma(turma);
-                          const alunoJaNaTurma = matriculasRelacionadasAlunoSelecionado.some(
-                            (matricula) =>
-                              matricula.turma_id === turma.id &&
-                              !["experimental", "pendente", "inativo"].includes(matricula.status)
-                          );
-                          const estaCheia = lotacao >= turma.vagas_totais;
-                          const disabled = estaCheia && !alunoJaNaTurma && !selecionado;
 
-                          return (
-                            <button
-                              key={`edicao-turma-${turma.id}`}
-                              type="button"
-                              onClick={() => {
-                                if (!disabled) toggleTurmaEdicaoAluno(turma.id);
-                              }}
-                              className={`w-full border rounded-2xl p-4 transition-all text-left ${
-                                disabled
-                                  ? "bg-slate-950/50 border-slate-800/50 cursor-not-allowed opacity-60"
-                                  : selecionado
-                                    ? "bg-orange-500/5 border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
-                                    : "bg-slate-950 border-slate-800 hover:border-slate-700 hover:bg-slate-900"
-                              }`}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className={`font-bold text-base ${selecionado ? "text-white" : "text-slate-200"}`}>
-                                      {turma.dia_semana}
-                                    </span>
-                                    <span className={selecionado ? "text-orange-400 font-bold text-base" : "text-slate-400 font-bold text-base"}>
-                                      {turma.horario.substring(0, 5)}
-                                    </span>
+                        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                          {diasComTurmaEditavel.map((dia) => {
+                            const temSelecionadaNoDia = turmasEditaveisAluno.some(
+                              (turma) => turma.dia_semana === dia && dadosEdicaoAluno.turmasIds.includes(turma.id)
+                            );
+
+                            return (
+                              <button
+                                key={`edicao-dia-${dia}`}
+                                type="button"
+                                onClick={() => setDiaFiltroModal(dia)}
+                                className={`flex-shrink-0 px-3 py-2 sm:py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1 ${
+                                  diaFiltroModal === dia
+                                    ? "bg-slate-700 text-white"
+                                    : "bg-slate-900 text-slate-500 border border-slate-800 hover:border-slate-700"
+                                }`}
+                              >
+                                {dia.substring(0, 3)}
+                                {temSelecionadaNoDia && <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="max-h-[24rem] overflow-y-auto scrollbar-hide p-3 sm:max-h-[28rem] sm:p-4">
+                        <div className="flex flex-col gap-3">
+                          {turmasEditaveisFiltradasNoModal.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-6 text-center bg-slate-900 rounded-xl border border-slate-800">
+                              Nenhuma turma disponível neste dia.
+                            </p>
+                          ) : (
+                            turmasEditaveisFiltradasNoModal.map((turma) => {
+                              const selecionado = dadosEdicaoAluno.turmasIds.includes(turma.id);
+                              const lotacao = contarOcupacaoTurma(turma);
+                              const matriculasVisiveisDaTurma = obterMatriculasVisiveisTurma(turma);
+                              const alunoJaNaTurma = matriculasRelacionadasAlunoSelecionado.some(
+                                (matricula) =>
+                                  matricula.turma_id === turma.id &&
+                                  !["experimental", "pendente", "inativo"].includes(matricula.status)
+                              );
+                              const estaCheia = lotacao >= turma.vagas_totais;
+                              const disabled = estaCheia && !alunoJaNaTurma && !selecionado;
+
+                              return (
+                                <button
+                                  key={`edicao-turma-${turma.id}`}
+                                  type="button"
+                                  onClick={() => {
+                                    if (!disabled) toggleTurmaEdicaoAluno(turma.id);
+                                  }}
+                                  className={`w-full border rounded-2xl p-4 transition-all text-left ${
+                                    disabled
+                                      ? "bg-slate-950/50 border-slate-800/50 cursor-not-allowed opacity-60"
+                                      : selecionado
+                                        ? "bg-orange-500/5 border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.1)]"
+                                        : "bg-slate-900 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80"
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className={`font-bold text-base ${selecionado ? "text-white" : "text-slate-200"}`}>
+                                          {turma.dia_semana}
+                                        </span>
+                                        <span className={selecionado ? "text-orange-400 font-bold text-base" : "text-slate-400 font-bold text-base"}>
+                                          {turma.horario.substring(0, 5)}
+                                        </span>
+                                      </div>
+                                      <div className={`text-[10px] font-bold uppercase tracking-wider ${selecionado ? "text-orange-500/80" : "text-slate-500"}`}>
+                                        {turma.nivel}
+                                      </div>
+                                      <p className="text-xs text-slate-500 mt-2">
+                                        Professor: {obterNomeProfessorTurma(turma)}
+                                      </p>
+                                    </div>
+
+                                    <div className="flex flex-col items-end gap-2">
+                                      {selecionado ? (
+                                        <CheckCircle2 className="w-6 h-6 text-orange-500" />
+                                      ) : disabled ? (
+                                        <span className="text-[10px] font-bold text-red-500 uppercase">Lotada</span>
+                                      ) : (
+                                        <div className="w-6 h-6 rounded-full border-2 border-slate-700"></div>
+                                      )}
+
+                                      <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider ${
+                                        estaCheia ? "bg-red-500/10 text-red-500" : "bg-slate-800 text-slate-400"
+                                      }`}>
+                                        {matriculasVisiveisDaTurma.length} / {turma.vagas_totais} vagas
+                                      </span>
+                                    </div>
                                   </div>
-                                  <div className={`text-[10px] font-bold uppercase tracking-wider ${selecionado ? "text-orange-500/80" : "text-slate-500"}`}>
-                                    {turma.nivel}
-                                  </div>
-                                  <p className="text-xs text-slate-500 mt-2">
-                                    Professor: {obterNomeProfessorTurma(turma)}
-                                  </p>
-                                </div>
-
-                                <div className="flex flex-col items-end gap-2">
-                                  {selecionado ? (
-                                    <CheckCircle2 className="w-6 h-6 text-orange-500" />
-                                  ) : disabled ? (
-                                    <span className="text-[10px] font-bold text-red-500 uppercase">Lotada</span>
-                                  ) : (
-                                    <div className="w-6 h-6 rounded-full border-2 border-slate-700"></div>
-                                  )}
-
-                                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider ${
-                                    estaCheia ? "bg-red-500/10 text-red-500" : "bg-slate-800 text-slate-400"
-                                  }`}>
-                                    {matriculasVisiveisDaTurma.length} / {turma.vagas_totais} vagas
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     {turmasSelecionadasEdicaoAluno.length > 0 ? (

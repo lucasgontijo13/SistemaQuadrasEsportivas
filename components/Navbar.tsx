@@ -6,11 +6,13 @@ import { usePathname, useRouter } from "next/navigation"; // Importados para nav
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   User as UserIcon, LogOut, Loader2, ShieldCheck, 
-  CalendarDays, Bell, ChevronLeft 
+  CalendarDays, Bell, ChevronLeft, AlertTriangle
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { User, Session } from "@supabase/supabase-js"; // Importa o tipo oficial do Supabase
-import { Perfil } from "@/types"; // Importa a sua interface de perfil
+import { AlertaPendenciaMatricula, Perfil } from "@/types"; // Importa a sua interface de perfil
+import { buscarAlertasPendenciasEquipe } from "@/services/adminService";
+import { formatarTempoAbertoPendencia, obterLabelStatusPendencia } from "@/utils/matriculaPendencia";
 
 
 export function Navbar() {
@@ -26,43 +28,70 @@ export function Navbar() {
   const [carregando, setCarregando] = useState(true);
   const [menuAberto, setMenuAberto] = useState(false);
   const [temPendencia, setTemPendencia] = useState(false);
+  const [alertasEquipe, setAlertasEquipe] = useState<AlertaPendenciaMatricula[]>([]);
   const [notificacaoAberta, setNotificacaoAberta] = useState(false);
 
   useEffect(() => {
     // Transformamos a busca de dados numa função que recebe a sessão atual
     async function atualizarEstado(session: Session | null) {
-      if (session) {
-        setUsuarioLogado(session.user);
+      try {
+        if (session) {
+          setUsuarioLogado(session.user);
+          let perfilAtual: Perfil | null = null;
 
-        // Busca o Perfil
-        const { data: perfilData } = await supabase
-          .from('perfis')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        
-        if (perfilData) setPerfil(perfilData);
+          // Busca o Perfil
+          const { data: perfilData } = await supabase
+            .from('perfis')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (perfilData) {
+            perfilAtual = perfilData as Perfil;
+            setPerfil(perfilAtual);
+          }
 
-        // Busca Pendências de Dados
-        const { data: matriculas } = await supabase
-          .from('matriculas')
-          .select('status')
-          .eq('perfil_id', session.user.id)
-          .eq('status', 'aguardando_dados')
-          .limit(1);
+          // Busca Pendências de Dados
+          const { data: matriculas } = await supabase
+            .from('matriculas')
+            .select('status')
+            .eq('perfil_id', session.user.id)
+            .eq('status', 'aguardando_dados')
+            .limit(1);
 
-        if (matriculas && matriculas.length > 0) {
-          setTemPendencia(true);
+          if (matriculas && matriculas.length > 0) {
+            setTemPendencia(true);
+          } else {
+            setTemPendencia(false);
+          }
+
+          const tipoPerfilAtual =
+            perfilAtual?.tipo ||
+            (typeof session.user.user_metadata?.tipo === "string" ? session.user.user_metadata.tipo : "") ||
+            (typeof session.user.app_metadata?.tipo === "string" ? session.user.app_metadata.tipo : "") ||
+            (typeof session.user.app_metadata?.role === "string" ? session.user.app_metadata.role : "") ||
+            "aluno";
+
+          if (tipoPerfilAtual === "admin" || tipoPerfilAtual === "professor") {
+            const alertas = await buscarAlertasPendenciasEquipe(session.user.id, tipoPerfilAtual);
+            setAlertasEquipe(alertas);
+          } else {
+            setAlertasEquipe([]);
+          }
         } else {
-          setTemPendencia(false); // NOVO: Garante que a pendência some se não houver mais matrículas travadas
+          // Se não houver sessão, limpa os dados
+          setUsuarioLogado(null);
+          setPerfil(null);
+          setTemPendencia(false);
+          setAlertasEquipe([]);
         }
-      } else {
-        // Se não houver sessão, limpa os dados
-        setUsuarioLogado(null);
-        setPerfil(null);
+      } catch (error) {
+        console.error("Erro ao atualizar navbar:", error);
         setTemPendencia(false);
+        setAlertasEquipe([]);
+      } finally {
+        setCarregando(false);
       }
-      setCarregando(false);
     }
 
     // 1. Executa a busca inicial (quando o utilizador dá F5)
@@ -82,11 +111,13 @@ export function Navbar() {
       });
     };
     window.addEventListener("perfilAtualizado", recarregarNavbar);
+    window.addEventListener("painelAtualizado", recarregarNavbar);
 
     // Limpeza dos listeners quando o componente é desmontado
     return () => {
       subscription.unsubscribe();
       window.removeEventListener("perfilAtualizado", recarregarNavbar); // NOVO
+      window.removeEventListener("painelAtualizado", recarregarNavbar);
     };
   }, []);
 
@@ -126,6 +157,8 @@ export function Navbar() {
       : perfil?.tipo === "professor"
         ? "Painel Professor"
         : "Painel";
+  const possuiNotificacoes = temPendencia || alertasEquipe.length > 0;
+  const alertasEquipeVisiveis = alertasEquipe.slice(0, 4);
 
   return (
     <motion.header 
@@ -236,7 +269,7 @@ export function Navbar() {
                   className="p-2 text-slate-400 hover:text-white transition-colors relative bg-slate-900/50 rounded-full border border-slate-800/50 hover:border-orange-500/50"
                 >
                   <Bell className="w-6 h-6" />
-                  {temPendencia && (
+                  {possuiNotificacoes && (
                     <span className="absolute top-2 right-2 w-3 h-3 bg-orange-500 rounded-full border-2 border-slate-950 animate-pulse"></span>
                   )}
                 </button>
@@ -247,19 +280,76 @@ export function Navbar() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 10 }}
-                      className="absolute right-0 mt-2 w-72 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-4 z-50"
+                      className="absolute right-0 mt-2 w-80 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-4 z-50"
                     >
                       <h4 className="text-white font-bold mb-2 text-sm">Notificações</h4>
                       <div className="h-px bg-slate-800 mb-3" />
-                      {temPendencia ? (
-                        <Link 
-                          href="/perfil" 
-                          onClick={() => setNotificacaoAberta(false)}
-                          className="block p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl hover:bg-orange-500/20 transition-all"
-                        >
-                          <p className="text-xs text-orange-400 font-bold mb-1">📝 Dados pendentes!</p>
-                          <p className="text-[11px] text-slate-400 leading-tight">Complete seus dados no perfil para validar a matrícula.</p>
-                        </Link>
+                      {alertasEquipe.length > 0 || temPendencia ? (
+                        <div className="space-y-3">
+                          {alertasEquipe.length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                                Pendências vencidas
+                              </p>
+                              {alertasEquipeVisiveis.map((alerta) => {
+                                const atrasoHoras = Math.max(1, alerta.horas_em_aberto - alerta.prazo_horas);
+                                const complemento =
+                                  alerta.total_turmas_relacionadas > 1
+                                    ? `${alerta.total_turmas_relacionadas} turmas`
+                                    : alerta.dia_semana && alerta.horario
+                                      ? `${alerta.dia_semana.substring(0, 3)} ${alerta.horario.substring(0, 5)}`
+                                      : "Abrir em Matriculados";
+
+                                return (
+                                  <Link
+                                    key={alerta.chave}
+                                    href="/admin/matriculas"
+                                    onClick={() => setNotificacaoAberta(false)}
+                                    className="block rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 hover:bg-amber-500/15 transition-all"
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-300" />
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-bold text-amber-300">
+                                          {obterLabelStatusPendencia(alerta.status)} vencida
+                                        </p>
+                                        <p className="mt-0.5 text-[12px] font-semibold text-white leading-tight">
+                                          {alerta.nome_aluno}
+                                        </p>
+                                        <p className="mt-1 text-[11px] text-slate-300 leading-tight">
+                                          Há {formatarTempoAbertoPendencia(atrasoHoras)} • {complemento}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </Link>
+                                );
+                              })}
+                              {alertasEquipe.length > alertasEquipeVisiveis.length && (
+                                <Link
+                                  href="/admin/matriculas"
+                                  onClick={() => setNotificacaoAberta(false)}
+                                  className="block text-center text-[11px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                >
+                                  Ver todas em Matriculados
+                                </Link>
+                              )}
+                            </div>
+                          )}
+
+                          {temPendencia && (
+                            <>
+                              {alertasEquipe.length > 0 && <div className="h-px bg-slate-800" />}
+                              <Link 
+                                href="/perfil" 
+                                onClick={() => setNotificacaoAberta(false)}
+                                className="block p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl hover:bg-orange-500/20 transition-all"
+                              >
+                                <p className="text-xs text-orange-400 font-bold mb-1">Dados pendentes</p>
+                                <p className="text-[11px] text-slate-400 leading-tight">Complete seus dados no perfil para validar a matrícula.</p>
+                              </Link>
+                            </>
+                          )}
+                        </div>
                       ) : (
                         <p className="text-xs text-slate-500 text-center py-4">Nenhuma notificação nova.</p>
                       )}

@@ -201,8 +201,8 @@ export default function AgendaPage() {
 
   if (contextoAluno?.perfil && contextoAluno.perfil.tipo !== "aluno") {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-50 pb-20">
-        <main className="max-w-2xl mx-auto px-6 pt-10">
+      <div className="min-h-screen bg-slate-950 text-slate-50 pt-[calc(5rem+env(safe-area-inset-top))] pb-20">
+        <main className="max-w-2xl mx-auto px-6 pt-6">
           <div className="rounded-[2rem] border border-slate-800 bg-slate-900/40 p-8 text-center">
             <CalendarDays className="mx-auto mb-4 h-10 w-10 text-orange-500" />
             <h1 className="text-2xl font-bold text-white">Esta área é voltada para alunos</h1>
@@ -236,8 +236,8 @@ export default function AgendaPage() {
   const naoTemNadaParaMostrar = !solicitacaoAtiva && aulasPorDia.length === 0;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pb-20">
-      <main className="max-w-4xl mx-auto px-6 pt-10 space-y-8">
+    <div className="min-h-screen bg-slate-950 text-slate-50 selection:bg-orange-500 selection:text-white pt-[calc(5rem+env(safe-area-inset-top))] pb-20">
+      <main className="max-w-4xl mx-auto px-6 pt-6 space-y-8">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-white">
             <CalendarDays className="h-8 w-8 text-orange-500" />

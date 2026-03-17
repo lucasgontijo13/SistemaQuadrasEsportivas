@@ -37,6 +37,8 @@ export interface Matricula {
   perfil_id: string;
   turma_id: number;
   status: 'experimental' | 'ativo' | 'inativo' | 'aguardando_dados' | 'aguardando_pagamento' | 'pendente' | 'aguardando_aceite_professor';
+  created_at?: string | null;
+  status_em?: string | null;
   data_inicio?: string | null;
   status_pos_aceite?: 'ativo' | 'aguardando_dados' | 'aguardando_pagamento' | null;
   professor_indicacao_id?: string | null;
@@ -45,6 +47,21 @@ export interface Matricula {
   ultima_recusa_em?: string | null;
   perfis?: Perfil; 
   turmas?: Turma; 
+}
+
+export interface AlertaPendenciaMatricula {
+  chave: string;
+  matricula_id: number;
+  perfil_id: string;
+  nome_aluno: string;
+  whatsapp_aluno: string;
+  status: 'aguardando_dados' | 'aguardando_pagamento' | 'aguardando_aceite_professor';
+  data_referencia: string;
+  horas_em_aberto: number;
+  prazo_horas: number;
+  total_turmas_relacionadas: number;
+  dia_semana?: string | null;
+  horario?: string | null;
 }
 
 export interface Turma {
